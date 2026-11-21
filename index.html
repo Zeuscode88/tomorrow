@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr" class="h-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 antialiased">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>tomorrow - Les Apps Qui Devraient Exister</title>
+    <meta name="description" content="L'App Store africain des applications qui manquent à l'Afrique. Découvrez, explorez par pays africain et secteur, votez pour inspirer les développeurs locaux, avec 4 nouveautés quotidiennes propulsées par IA." />
+    <meta property="og:title" content="tomorrow - Les Apps Qui Devraient Exister" />
+    <meta property="og:description" content="L'App Store africain des applications qui manquent à l'Afrique. Découvrez, explorez par pays africain et secteur, votez pour inspirer les développeurs locaux, avec 4 nouveautés quotidiennes propulsées par IA." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="tomorrow" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('tomorrow_theme');
+          if (saved === 'dark') {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="h-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 selection:bg-slate-900 selection:text-white dark:selection:bg-white dark:selection:text-black">
+    <div id="root" class="h-full"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

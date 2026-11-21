@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 2 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'createdAt'])
+        && data.email is string && data.email.size() <= 200
+        && data.name is string && data.name.size() <= 120
+        && data.role is string && data.role.size() <= 80
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidApp(data) {
+      return data.keys().hasAll(['id', 'title', 'tagline', 'continent', 'country', 'sector', 'problemSolved', 'votes', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.tagline is string && data.tagline.size() <= 300
+        && data.continent == 'Afrique'
+        && data.country is string && data.country.size() <= 80
+        && data.sector is string && data.sector.size() <= 80
+        && data.problemSolved is string && data.problemSolved.size() <= 2000
+        && data.votes is number && data.votes >= 0
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidBuild(data) {
+      return data.keys().hasAll(['id', 'appId', 'appTitle', 'title', 'progressStage', 'progressPercent', 'isGroupProject', 'isPublic', 'ownerId', 'ownerName', 'activeVersionId', 'members', 'versions', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'appId', 'appTitle', 'title', 'summary', 'progressStage', 'progressPercent', 'isGroupProject', 'isPublic', 'ownerId', 'ownerName', 'members', 'githubUrl', 'activeVersionId', 'versions', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.appId)
+        && data.appTitle is string && data.appTitle.size() <= 160
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && (!('summary' in data) || (data.summary is string && data.summary.size() <= 2000))
+        && data.progressStage in ['Concept', 'Prototype', 'Alpha', 'Beta', 'Production']
+        && data.progressPercent is number && data.progressPercent >= 0 && data.progressPercent <= 100
+        && data.isGroupProject is bool
+        && data.isPublic is bool
+        && data.ownerId is string && data.ownerId.size() <= 128
+        && data.ownerName is string && data.ownerName.size() <= 120
+        && (!('githubUrl' in data) || (data.githubUrl is string && data.githubUrl.size() <= 500))
+        && data.activeVersionId is string && data.activeVersionId.size() <= 128
+        && data.members is list && data.members.size() >= 1 && data.members.size() <= 20
+        && data.versions is list && data.versions.size() >= 1 && data.versions.size() <= 25
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    // User profiles (PII scoped to authenticated owner or admin email)
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || (request.auth.token.email_verified == true && request.auth.token.email == 'jonatha2ngs@gmail.com'));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
+    }
+
+    // Applications catalog (shared African App Store)
+    match /apps/{appId} {
+      allow get, list: if resource.data.continent == 'Afrique';
+      allow create: if isValidId(appId) && isValidApp(incoming());
+      allow update: if isValidId(appId) && isValidApp(incoming());
+    }
+
+    // Collaborative project builds, versions, squads & AI prototypes (public renders visible to all)
+    match /builds/{buildId} {
+      allow get, list: if resource.data.isPublic == true;
+      allow create: if isValidId(buildId) && isValidBuild(incoming());
+      allow update: if isValidId(buildId) && isValidBuild(incoming()) && incoming().ownerId == existing().ownerId && incoming().appId == existing().appId;
+    }
+  }
+}

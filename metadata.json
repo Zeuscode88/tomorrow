@@ -1,0 +1,7 @@
+{
+  "name": "NovaStore - Les Apps Qui Devraient Exister",
+  "description": "L'App Store mondial des applications qui manquent au monde. Découvrez, explorez par continent et secteur, votez pour inspirer les développeurs locaux, avec 4 nouveautés quotidiennes propulsées par IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "usr-admin-jonathan",
+    "email": "jonatha2ngs@gmail.com",
+    "salt": "8b482b0c31502e7c7dcc8ee839f14fdc",
+    "passwordHash": "e39adce8aede7e700cab51fe29863fbdb40494f05d2d2fa4326a63e69f349e45a24522794a8b8cc339c3f8318b240b08a8e574b7f9620c85956dcce2f53b06d8",
+    "name": "Jonathan (Administrateur)",
+    "role": "Administrateur",
+    "country": "France",
+    "createdAt": "2026-09-29T23:42:45.573Z"
+  },
+  {
+    "id": "usr-1790725368515-6c3af637",
+    "email": "testcitoyen@novastore.world",
+    "passwordHash": "e4f33f54a3fd5fe0796c49e077ed2c6cc47a92127b4382cae55d3f8c0e3cbd88a822920fbf00c08c31f85dd09459602b48346a5c0a6bfb03163208616132bcd3",
+    "salt": "aa304243e68a90c06607cc7cf6afd932",
+    "name": "Amadou Diop",
+    "role": "Citoyen / Usager",
+    "country": "Sénégal",
+    "createdAt": "2026-09-29T23:42:48.515Z"
+  }
+]

@@ -1,0 +1,201 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile in tomorrow",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "User identifier"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200,
+          "description": "User email address"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Full name or nickname"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Role in the community"
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Country of origin or residence"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "App": {
+      "title": "App",
+      "description": "Application concept document in tomorrow",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique app ID"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 140,
+          "description": "Title of the application"
+        },
+        "tagline": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "One sentence summary"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 3000,
+          "description": "Detailed description of the application"
+        },
+        "continent": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Geographic continent (Afrique)"
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Target African country"
+        },
+        "sector": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Domain sector"
+        },
+        "problemSolved": {
+          "type": "string",
+          "maxLength": 1500,
+          "description": "Identified ground problem"
+        },
+        "votes": {
+          "type": "number",
+          "description": "Total community votes"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Submission timestamp"
+        }
+      },
+      "required": ["title", "tagline", "continent", "country", "sector", "problemSolved", "votes", "createdAt"]
+    },
+    "Build": {
+      "title": "Build",
+      "description": "Collaborative developer or AI-generated implementation build for a tomorrow project",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique build identifier"
+        },
+        "appId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent application concept ID"
+        },
+        "appTitle": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Parent application title"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Build or squad title"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Progress summary and build notes"
+        },
+        "progressStage": {
+          "type": "string",
+          "enum": ["Concept", "Prototype", "Alpha", "Beta", "Production"],
+          "description": "Current lifecycle stage"
+        },
+        "progressPercent": {
+          "type": "number",
+          "description": "Completion percentage 0-100"
+        },
+        "isGroupProject": {
+          "type": "boolean",
+          "description": "Whether open to small group squad collaboration"
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Whether public render link is accessible to all visitors"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Creator user ID"
+        },
+        "ownerName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Creator display name"
+        },
+        "githubUrl": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional repository URL"
+        },
+        "activeVersionId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Currently published version ID"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "appId", "appTitle", "title", "progressStage", "progressPercent", "isGroupProject", "isPublic", "ownerId", "ownerName", "activeVersionId", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles keyed by user ID"
+    },
+    "/apps/{appId}": {
+      "schema": "App",
+      "description": "Collection of community and AI applications for Africa"
+    },
+    "/builds/{buildId}": {
+      "schema": "Build",
+      "description": "Collection of collaborative developer builds, versions, squads, and AI prototypes"
+    }
+  }
+}

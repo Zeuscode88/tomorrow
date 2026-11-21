@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Pure Black & White PWA Icon: Crisp Africa continent silhouette + small "tomorrow" below -->
+  <rect width="512" height="512" rx="112" fill="#000000" />
+  <g
+    transform="translate(120, 62) scale(11.33)"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="1.65"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path
+      fill="#ffffff"
+      fill-opacity="0.14"
+      d="M9.5 2.5C7.8 2.6 5.6 3.5 4.4 5.2C3.2 6.9 2.9 9.1 4.1 10.6C5.1 11.8 6.9 11.8 8.1 12.7C9.2 13.5 9.1 15.1 9.6 16.6C10.1 18.2 10.7 20.8 12.1 21.4C13.3 21.9 14.5 20.1 15.2 18.5C15.9 16.9 16.1 15.2 17.2 13.9C18.3 12.6 20.2 11.4 20.5 9.9C20.7 8.8 19.1 8.4 18.2 7.5C17.1 6.4 16.8 4.4 15.4 3.4C13.8 2.3 11.4 2.4 9.5 2.5Z"
+    />
+    <path
+      fill="#ffffff"
+      fill-opacity="0.14"
+      d="M19.4 15.6C19.8 15.4 20.3 15.9 20.1 16.9C19.9 17.8 19.3 18.8 18.8 18.9C18.4 19 18.2 18.1 18.5 17.1C18.7 16.3 19.1 15.8 19.4 15.6Z"
+    />
+  </g>
+  <text
+    x="256"
+    y="428"
+    text-anchor="middle"
+    fill="#ffffff"
+    font-family="Inter, 'Plus Jakarta Sans', 'DejaVu Sans', Arial, sans-serif"
+    font-size="40"
+    font-weight="700"
+    letter-spacing="1.2"
+  >tomorrow</text>
+</svg>
