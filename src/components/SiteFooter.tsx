@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sun, Moon, Languages, Check, Send, RefreshCw, ChevronUp } from 'lucide-react';
+import { Sun, Moon, Languages, Check, Send, RefreshCw, ChevronUp, Heart } from 'lucide-react';
 import { AFRICAN_LANGUAGES, getAfricanLanguageByCode } from '../data/africanLanguages';
 
 interface SiteFooterProps {
@@ -166,12 +166,12 @@ export const SiteFooter: React.FC<SiteFooterProps> = ({
             >
               {theme === 'dark' ? (
                 <>
-                  <Sun className="h-3.5 w-3.5 text-amber-400" />
+                  <Sun className="h-3.5 w-3.5 text-white" />
                   <span>Mode clair</span>
                 </>
               ) : (
                 <>
-                  <Moon className="h-3.5 w-3.5 text-slate-700" />
+                  <Moon className="h-3.5 w-3.5 text-black" />
                   <span>Mode sombre</span>
                 </>
               )}
@@ -185,10 +185,17 @@ export const SiteFooter: React.FC<SiteFooterProps> = ({
             href="https://t.me/+2250504206378"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 font-semibold text-slate-700 dark:text-slate-200 hover:text-black dark:hover:text-white transition-colors"
+            className="inline-flex items-center gap-2 font-semibold text-slate-900 dark:text-white hover:opacity-75 transition-opacity"
           >
-            <Send className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
-            <span>Réaliser avec le ❤️ par Jdeek studio</span>
+            <Send className="h-3.5 w-3.5 text-black dark:text-white" />
+            <span className="inline-flex items-center gap-1">
+              <span>Réaliser avec le</span>
+              <Heart
+                className="h-3.5 w-3.5 fill-black text-black dark:fill-white dark:text-white"
+                aria-label="❤️"
+              />
+              <span>par Jdeek studio</span>
+            </span>
           </a>
 
           <span className="text-[11px] text-slate-400 dark:text-slate-500 text-center">

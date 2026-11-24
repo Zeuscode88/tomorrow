@@ -303,7 +303,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
                 <div className="border-t border-slate-100 dark:border-zinc-800 pt-3 flex items-center justify-between">
                   <div className="flex items-center gap-1 text-xs font-bold text-slate-900 dark:text-white">
-                    <Heart className="h-4 w-4 text-rose-500 fill-rose-500" />
+                    <Heart className="h-4 w-4 text-black dark:text-white fill-black dark:fill-white" />
                     <span>{previewApp.votes} votes</span>
                   </div>
                   <div className="flex items-center gap-1 text-xs font-bold text-slate-900 dark:text-white">

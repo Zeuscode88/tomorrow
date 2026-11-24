@@ -1,18 +1,34 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { SEED_APPS } from './src/data/seedApps';
 import { AppIdea, Continent, Sector } from './src/types/app';
 import { ProjectBuild, BuildVersion, BuildMember } from './src/types/builder';
+import {
+  PublicProfile,
+  PortfolioItem,
+  ConnectionInvite,
+  DirectMessage,
+  AvailabilityStatus,
+} from './src/types/social';
 import { initializeApp as initFirebaseApp } from 'firebase/app';
-import { getFirestore, doc as fsDoc, setDoc as fsSetDoc } from 'firebase/firestore';
+import {
+  getFirestore,
+  doc as fsDoc,
+  setDoc as fsSetDoc,
+  deleteDoc as fsDeleteDoc,
+} from 'firebase/firestore';
 import dns from 'dns/promises';
 import net from 'net';
+import { ADMIN_EMAILS, isAdminEmail } from './src/utils/adminAuth';
+import { KeepChecklistItem, KeepNote, PlatformSettings } from './src/types/notes';
 
 dotenv.config();
 
@@ -37,6 +53,7 @@ interface StoredUser {
   role: string;
   country: string;
   createdAt: string;
+  suspended?: boolean;
 }
 
 const usersStore: Map<string, StoredUser> = new Map();
@@ -46,7 +63,28 @@ const USERS_FILE = path.join(__dirname, 'data_users.json');
 const SESSIONS_FILE = path.join(__dirname, 'data_sessions.json');
 const APPS_FILE = path.join(__dirname, 'data_apps.json');
 const BUILDS_FILE = path.join(__dirname, 'data_builds.json');
+const PROFILES_FILE = path.join(__dirname, 'data_profiles.json');
+const INVITATIONS_FILE = path.join(__dirname, 'data_invitations.json');
+const MESSAGES_FILE = path.join(__dirname, 'data_messages.json');
+const NOTES_FILE = path.join(__dirname, 'data_notes.json');
+const SETTINGS_FILE = path.join(__dirname, 'data_settings.json');
 let buildsStore: ProjectBuild[] = [];
+const profilesStore: Map<string, PublicProfile> = new Map();
+let invitationsStore: ConnectionInvite[] = [];
+let messagesStore: DirectMessage[] = [];
+let notesStore: KeepNote[] = [];
+let settingsStore: PlatformSettings = {
+  announcementBanner: '',
+  maintenanceMode: false,
+  allowRegistrations: true,
+  allowAIGeneration: true,
+};
+const passwordResetCodesMap: Map<
+  string,
+  { codeHash: string; salt: string; expiresAt: number; attempts: number }
+> = new Map();
+const userSocketsMap: Map<string, Set<WebSocket>> = new Map();
+const allSocketsSet: Set<WebSocket> = new Set();
 
 function loadPersistedApps() {
   try {
@@ -117,6 +155,265 @@ function savePersistedBuilds() {
     fs.writeFileSync(BUILDS_FILE, JSON.stringify(buildsStore, null, 2), 'utf-8');
   } catch (e) {
     console.warn('Could not save data_builds.json:', e);
+  }
+}
+
+function sanitizeSafeWebUrl(raw?: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString().slice(0, 300);
+    }
+  } catch {}
+  return undefined;
+}
+
+function ensurePublicProfileForUser(user: {
+  id: string;
+  name: string;
+  role: string;
+  country?: string;
+  createdAt?: string;
+}): PublicProfile {
+  const existing = profilesStore.get(user.id);
+  if (existing) {
+    return existing;
+  }
+  const created: PublicProfile = {
+    id: user.id,
+    name: user.name || 'Membre tomorrow',
+    role: user.role || 'Développeur local',
+    country: user.country || "Côte d'Ivoire",
+    headline: user.role || 'Contributeur tomorrow',
+    bio: '',
+    skills: [],
+    portfolioItems: [],
+    availability: 'Ouvert aux collabs',
+    updatedAt: user.createdAt || new Date().toISOString(),
+  };
+  profilesStore.set(user.id, created);
+  return created;
+}
+
+function loadPersistedProfiles() {
+  try {
+    if (fs.existsSync(PROFILES_FILE)) {
+      const raw = fs.readFileSync(PROFILES_FILE, 'utf-8');
+      const list: PublicProfile[] = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        list.forEach((p) => {
+          if (p && p.id && p.name) {
+            profilesStore.set(p.id, p);
+          }
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load data_profiles.json:', e);
+  }
+  usersStore.forEach((u) => {
+    ensurePublicProfileForUser(u);
+  });
+}
+
+function savePersistedProfiles() {
+  try {
+    fs.writeFileSync(
+      PROFILES_FILE,
+      JSON.stringify(Array.from(profilesStore.values()), null, 2),
+      'utf-8'
+    );
+  } catch (e) {
+    console.warn('Could not save data_profiles.json:', e);
+  }
+}
+
+function loadPersistedInvitations() {
+  try {
+    if (fs.existsSync(INVITATIONS_FILE)) {
+      const raw = fs.readFileSync(INVITATIONS_FILE, 'utf-8');
+      const list: ConnectionInvite[] = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        invitationsStore = list.filter((inv) => inv && inv.id && inv.fromUserId && inv.toUserId);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load data_invitations.json:', e);
+  }
+}
+
+function savePersistedInvitations() {
+  try {
+    fs.writeFileSync(INVITATIONS_FILE, JSON.stringify(invitationsStore, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Could not save data_invitations.json:', e);
+  }
+}
+
+function loadPersistedMessages() {
+  try {
+    if (fs.existsSync(MESSAGES_FILE)) {
+      const raw = fs.readFileSync(MESSAGES_FILE, 'utf-8');
+      const list: DirectMessage[] = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        messagesStore = list.filter((m) => m && m.id && m.senderId && m.recipientId && m.text);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load data_messages.json:', e);
+  }
+}
+
+function savePersistedMessages() {
+  try {
+    fs.writeFileSync(MESSAGES_FILE, JSON.stringify(messagesStore, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Could not save data_messages.json:', e);
+  }
+}
+
+function emitSocketToUsers(userIds: string[], event: string, payload: unknown) {
+  const frame = JSON.stringify({ event, payload });
+  for (const uid of userIds) {
+    const sockets = userSocketsMap.get(uid);
+    if (!sockets) continue;
+    sockets.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(frame);
+        } catch {}
+      }
+    });
+  }
+}
+
+function emitSocketBroadcast(event: string, payload: unknown) {
+  const frame = JSON.stringify({ event, payload });
+  allSocketsSet.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(frame);
+      } catch {}
+    }
+  });
+}
+
+function emitDailyDropPublished(
+  apps: AppIdea[],
+  source: 'ai' | 'admin' | 'community'
+) {
+  const dailyApps = apps.filter((a) => a.isDailyDrop && a.continent === 'Afrique');
+  if (dailyApps.length === 0) return;
+  emitSocketBroadcast('daily_drop:published', {
+    apps: dailyApps,
+    publishedAt: new Date().toISOString(),
+    source,
+  });
+}
+
+function makeConversationId(userA: string, userB: string): string {
+  return [userA, userB].sort().join('__');
+}
+
+function hasAcceptedInviteBetween(userA: string, userB: string): boolean {
+  return invitationsStore.some(
+    (inv) =>
+      inv.status === 'accepted' &&
+      ((inv.fromUserId === userA && inv.toUserId === userB) ||
+        (inv.fromUserId === userB && inv.toUserId === userA))
+  );
+}
+
+function loadPersistedNotes() {
+  try {
+    if (fs.existsSync(NOTES_FILE)) {
+      const raw = fs.readFileSync(NOTES_FILE, 'utf-8');
+      const list: KeepNote[] = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        notesStore = list.filter((n) => n && n.id && n.ownerId);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load data_notes.json:', e);
+  }
+}
+
+function savePersistedNotes() {
+  try {
+    fs.writeFileSync(NOTES_FILE, JSON.stringify(notesStore, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Could not save data_notes.json:', e);
+  }
+}
+
+function loadPersistedSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        settingsStore = {
+          announcementBanner:
+            typeof parsed.announcementBanner === 'string'
+              ? parsed.announcementBanner.slice(0, 300)
+              : '',
+          maintenanceMode: Boolean(parsed.maintenanceMode),
+          allowRegistrations:
+            parsed.allowRegistrations === undefined ? true : Boolean(parsed.allowRegistrations),
+          allowAIGeneration:
+            parsed.allowAIGeneration === undefined ? true : Boolean(parsed.allowAIGeneration),
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load data_settings.json:', e);
+  }
+}
+
+function savePersistedSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settingsStore, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Could not save data_settings.json:', e);
+  }
+}
+
+async function persistNoteToFirestore(note: KeepNote) {
+  if (!serverDb) return;
+  try {
+    await fsSetDoc(fsDoc(serverDb, 'notes', note.id), note, { merge: true });
+  } catch (err) {
+    console.warn(`Server Firestore write for note ${note.id} failed:`, err);
+  }
+}
+
+async function deleteNoteFromFirestoreServer(noteId: string) {
+  if (!serverDb) return;
+  try {
+    await fsDeleteDoc(fsDoc(serverDb, 'notes', noteId));
+  } catch (err) {
+    console.warn(`Server Firestore delete for note ${noteId} failed:`, err);
+  }
+}
+
+async function deleteBuildFromFirestoreServer(buildId: string) {
+  if (!serverDb) return;
+  try {
+    await fsDeleteDoc(fsDoc(serverDb, 'builds', buildId));
+  } catch (err) {
+    console.warn(`Server Firestore delete for build ${buildId} failed:`, err);
+  }
+}
+
+async function deleteAppFromFirestoreServer(appId: string) {
+  if (!serverDb) return;
+  try {
+    await fsDeleteDoc(fsDoc(serverDb, 'apps', appId));
+  } catch (err) {
+    console.warn(`Server Firestore delete for app ${appId} failed:`, err);
   }
 }
 
@@ -212,6 +509,77 @@ function getBearerToken(req: express.Request): string | null {
   return authHeader.split(' ')[1].trim();
 }
 
+function hashOtpCode(code: string, salt: string): string {
+  return crypto.createHash('sha256').update(`${salt}:${code}`).digest('hex');
+}
+
+function createPasswordResetOtp(email: string): { code: string; expiresAt: number } {
+  const cleanEmail = email.trim().toLowerCase();
+  const code = crypto.randomInt(100000, 1000000).toString();
+  const salt = crypto.randomBytes(16).toString('hex');
+  const expiresAt = Date.now() + 15 * 60 * 1000;
+  passwordResetCodesMap.set(cleanEmail, {
+    codeHash: hashOtpCode(code, salt),
+    salt,
+    expiresAt,
+    attempts: 0,
+  });
+  return { code, expiresAt };
+}
+
+function verifyPasswordResetOtp(
+  email: string,
+  code: string
+): { valid: boolean; reason?: string } {
+  const cleanEmail = email.trim().toLowerCase();
+  const entry = passwordResetCodesMap.get(cleanEmail);
+  if (!entry) {
+    return { valid: false, reason: 'Aucune demande de code active pour cet email.' };
+  }
+  if (Date.now() > entry.expiresAt) {
+    passwordResetCodesMap.delete(cleanEmail);
+    return { valid: false, reason: 'Ce code de récupération a expiré (validité 15 min).' };
+  }
+  if (entry.attempts >= 5) {
+    passwordResetCodesMap.delete(cleanEmail);
+    return { valid: false, reason: 'Trop de tentatives erronées. Demandez un nouveau code.' };
+  }
+
+  const candidateHash = hashOtpCode(code.trim(), entry.salt);
+  const a = Buffer.from(candidateHash, 'hex');
+  const b = Buffer.from(entry.codeHash, 'hex');
+  const match = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!match) {
+    entry.attempts += 1;
+    if (entry.attempts >= 5) {
+      passwordResetCodesMap.delete(cleanEmail);
+    }
+    return { valid: false, reason: 'Code de récupération incorrect.' };
+  }
+
+  passwordResetCodesMap.delete(cleanEmail);
+  return { valid: true };
+}
+
+function revokeUserSessions(userId: string) {
+  let changed = false;
+  for (const [tok, sess] of sessionsStore.entries()) {
+    if (sess.userId === userId) {
+      sessionsStore.delete(tok);
+      changed = true;
+    }
+  }
+  if (changed) savePersistedSessions();
+}
+
+function findUserByEmail(email: string): StoredUser | null {
+  const cleanEmail = email.trim().toLowerCase();
+  for (const u of usersStore.values()) {
+    if (u.email.toLowerCase() === cleanEmail) return u;
+  }
+  return null;
+}
+
 function getUserByToken(token: string | null): StoredUser | null {
   if (!token) return null;
   const session = sessionsStore.get(token);
@@ -221,12 +589,16 @@ function getUserByToken(token: string | null): StoredUser | null {
       savePersistedSessions();
       return null;
     }
-    return usersStore.get(session.userId) || null;
+    const u = usersStore.get(session.userId) || null;
+    if (u?.suspended) return null;
+    return u;
   }
 
   // Check if token matches a direct userId
   if (usersStore.has(token)) {
-    return usersStore.get(token) || null;
+    const u = usersStore.get(token) || null;
+    if (u?.suspended) return null;
+    return u;
   }
 
   return null;
@@ -244,6 +616,8 @@ async function resolveUserByToken(token: string | null): Promise<StoredUser | nu
 
   const cached = firebaseTokenCache.get(token);
   if (cached && cached.expiresAt > Date.now()) {
+    const localRecord = findUserByEmail(cached.user.email);
+    if (localRecord?.suspended) return null;
     return cached.user;
   }
 
@@ -262,61 +636,79 @@ async function resolveUserByToken(token: string | null): Promise<StoredUser | nu
     if (!fbAccount || !fbAccount.localId) return null;
 
     const email = String(fbAccount.email || '').toLowerCase();
-    const isAdmin = email === ADMIN_EMAIL.toLowerCase();
+    const localRecord = email ? findUserByEmail(email) : null;
+    if (localRecord?.suspended) return null;
+
+    const isAdmin = isAdminEmail(email);
     const resolved: StoredUser = {
       id: fbAccount.localId,
       email,
       passwordHash: '',
       salt: '',
-      name: fbAccount.displayName || (email ? email.split('@')[0] : 'Membre'),
-      role: isAdmin ? 'Administrateur' : 'Développeur local',
-      country: 'Afrique',
-      createdAt: new Date().toISOString(),
+      name: fbAccount.displayName || localRecord?.name || (email ? email.split('@')[0] : 'Membre'),
+      role: isAdmin ? 'Administrateur' : localRecord?.role || 'Développeur local',
+      country: localRecord?.country || "Côte d'Ivoire",
+      createdAt: localRecord?.createdAt || new Date().toISOString(),
     };
     firebaseTokenCache.set(token, { user: resolved, expiresAt: Date.now() + 5 * 60 * 1000 });
+    ensurePublicProfileForUser(resolved);
     return resolved;
   } catch {
     return null;
   }
 }
 
-// Exclusive Admin email
-const ADMIN_EMAIL = 'jonatha2ngs@gmail.com';
+// Primary Admin email reference
+const PRIMARY_ADMIN_EMAIL = ADMIN_EMAILS[0];
 
-// Pre-seed exclusive Admin account for jonatha2ngs@gmail.com
+// Pre-seed primary Admin account only if not already present on disk
 const adminSalt = crypto.randomBytes(16).toString('hex');
 const adminUser: StoredUser = {
   id: 'usr-admin-jonathan',
-  email: ADMIN_EMAIL.toLowerCase(),
+  email: PRIMARY_ADMIN_EMAIL.toLowerCase(),
   salt: adminSalt,
   passwordHash: hashPassword('admin123456', adminSalt),
   name: 'Jonathan (Administrateur)',
   role: 'Administrateur',
-  country: 'France',
+  country: "Côte d'Ivoire",
   createdAt: new Date().toISOString(),
 };
 usersStore.set(adminUser.id, adminUser);
 
-// Load persisted accounts & sessions from disk
+// Load persisted accounts, sessions, catalog & social data from disk
 loadPersistedUsers();
 loadPersistedSessions();
 loadPersistedApps();
 loadPersistedBuilds();
+loadPersistedProfiles();
+loadPersistedInvitations();
+loadPersistedMessages();
+loadPersistedNotes();
+loadPersistedSettings();
 if (!fs.existsSync(APPS_FILE)) {
   savePersistedApps();
 }
 if (!fs.existsSync(BUILDS_FILE)) {
   savePersistedBuilds();
 }
+if (!fs.existsSync(PROFILES_FILE)) {
+  savePersistedProfiles();
+}
+if (!fs.existsSync(NOTES_FILE)) {
+  savePersistedNotes();
+}
+if (!fs.existsSync(SETTINGS_FILE)) {
+  savePersistedSettings();
+}
 
-// Admin protection middleware
+// Admin protection middleware (jonatha2ngs@gmail.com & lumanegrah88@gmail.com)
 async function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   const token = getBearerToken(req);
   const user = await resolveUserByToken(token);
-  if (!user || user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+  if (!user || !isAdminEmail(user.email)) {
     return res.status(403).json({
       success: false,
-      error: 'Accès interdit : cet espace administratif est strictement réservé à jonatha2ngs@gmail.com.',
+      error: 'Accès interdit : cet espace administratif est réservé aux administrateurs habilités.',
     });
   }
   (req as any).user = user;
@@ -354,7 +746,7 @@ const ai = apiKey
 
 // Register
 app.post('/api/auth/register', (req, res) => {
-  const { email, password, name, role = 'Citoyen / Usager', country = 'Afrique' } = req.body;
+  const { email, password, name, role = 'Citoyen / Usager', country = "Côte d'Ivoire" } = req.body;
 
   if (!email || !password || !name) {
     return res.status(400).json({ success: false, error: 'Email, mot de passe et nom requis.' });
@@ -365,50 +757,26 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ success: false, error: 'Format d\'adresse email invalide.' });
   }
 
+  if (!settingsStore.allowRegistrations && !isAdminEmail(cleanEmail)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Les nouvelles inscriptions sont temporairement suspendues par l\'administration.',
+    });
+  }
+
   if (String(password).length < 6) {
     return res.status(400).json({ success: false, error: 'Le mot de passe doit comporter au moins 6 caractères.' });
   }
 
-  // Check if exists
   for (const user of usersStore.values()) {
-    if (user.email === cleanEmail) {
-      // If it's the pre-seeded admin user registering, update their password and info
-      if (cleanEmail === ADMIN_EMAIL.toLowerCase()) {
-        const salt = crypto.randomBytes(16).toString('hex');
-        user.passwordHash = hashPassword(String(password), salt);
-        user.salt = salt;
-        user.name = String(name).trim() || 'Jonathan (Administrateur)';
-        user.role = 'Administrateur';
-        if (country) user.country = String(country).trim();
-
-        const token = crypto.randomBytes(32).toString('hex');
-        sessionsStore.set(token, {
-          userId: user.id,
-          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-        });
-
-        return res.json({
-          success: true,
-          token,
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            country: user.country,
-            createdAt: user.createdAt,
-            isAdmin: true,
-          },
-        });
-      }
-
+    if (user.email.toLowerCase() === cleanEmail) {
       return res.status(409).json({ success: false, error: 'Un compte existe déjà avec cette adresse email.' });
     }
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
   const passwordHash = hashPassword(String(password), salt);
-  const isAdmin = cleanEmail === ADMIN_EMAIL.toLowerCase();
+  const isAdmin = isAdminEmail(cleanEmail);
   const newUser: StoredUser = {
     id: `usr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     email: cleanEmail,
@@ -422,8 +790,9 @@ app.post('/api/auth/register', (req, res) => {
 
   usersStore.set(newUser.id, newUser);
   savePersistedUsers();
+  ensurePublicProfileForUser(newUser);
+  savePersistedProfiles();
 
-  // Create session (valid 30 days)
   const token = crypto.randomBytes(32).toString('hex');
   sessionsStore.set(token, {
     userId: newUser.id,
@@ -455,17 +824,17 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const cleanEmail = String(email).trim().toLowerCase();
-  let foundUser: StoredUser | null = null;
-
-  for (const user of usersStore.values()) {
-    if (user.email === cleanEmail) {
-      foundUser = user;
-      break;
-    }
-  }
+  const foundUser = findUserByEmail(cleanEmail);
 
   if (!foundUser || !verifyPassword(String(password), foundUser.salt, foundUser.passwordHash)) {
     return res.status(401).json({ success: false, error: 'Identifiants invalides. Vérifiez votre email et mot de passe.' });
+  }
+
+  if (foundUser.suspended) {
+    return res.status(403).json({
+      success: false,
+      error: 'Ce compte a été suspendu par un administrateur.',
+    });
   }
 
   const token = crypto.randomBytes(32).toString('hex');
@@ -475,7 +844,7 @@ app.post('/api/auth/login', (req, res) => {
   });
   savePersistedSessions();
 
-  const isAdmin = foundUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isAdmin = isAdminEmail(foundUser.email);
 
   return res.json({
     success: true,
@@ -484,11 +853,96 @@ app.post('/api/auth/login', (req, res) => {
       id: foundUser.id,
       email: foundUser.email,
       name: foundUser.name,
-      role: foundUser.role,
+      role: isAdmin ? 'Administrateur' : foundUser.role,
       country: foundUser.country,
       createdAt: foundUser.createdAt,
       isAdmin,
     },
+  });
+});
+
+// Password Recovery Step 1: Request reset (never exposes OTP in unauthenticated HTTP response)
+app.post('/api/auth/forgot-password', (req, res) => {
+  const { email } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ success: false, error: 'Adresse email valide requise.' });
+  }
+
+  const foundUser = findUserByEmail(cleanEmail);
+  if (foundUser && !foundUser.suspended) {
+    createPasswordResetOtp(cleanEmail);
+  }
+
+  return res.json({
+    success: true,
+    message:
+      "Si un compte est enregistré avec cet email, consultez votre boîte mail (lien Firebase) ou saisissez le code de récupération à 6 chiffres fourni par l'administration.",
+  });
+});
+
+// Password Recovery Step 2: Verify 6-digit OTP & set new password
+app.post('/api/auth/reset-password', (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const cleanCode = typeof code === 'string' ? code.trim() : '';
+  const cleanPassword = typeof newPassword === 'string' ? newPassword : '';
+
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ success: false, error: 'Adresse email invalide.' });
+  }
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return res.status(400).json({ success: false, error: 'Le code de récupération doit contenir 6 chiffres.' });
+  }
+  if (cleanPassword.length < 6) {
+    return res.status(400).json({
+      success: false,
+      error: 'Le nouveau mot de passe doit comporter au moins 6 caractères.',
+    });
+  }
+
+  const otpCheck = verifyPasswordResetOtp(cleanEmail, cleanCode);
+  if (!otpCheck.valid) {
+    return res.status(400).json({ success: false, error: otpCheck.reason || 'Code invalide.' });
+  }
+
+  const foundUser = findUserByEmail(cleanEmail);
+  if (!foundUser) {
+    return res.status(404).json({ success: false, error: 'Compte introuvable pour cet email.' });
+  }
+  if (foundUser.suspended) {
+    return res.status(403).json({ success: false, error: 'Ce compte est suspendu.' });
+  }
+
+  const freshSalt = crypto.randomBytes(16).toString('hex');
+  foundUser.salt = freshSalt;
+  foundUser.passwordHash = hashPassword(cleanPassword, freshSalt);
+  usersStore.set(foundUser.id, foundUser);
+  savePersistedUsers();
+
+  revokeUserSessions(foundUser.id);
+  const token = crypto.randomBytes(32).toString('hex');
+  sessionsStore.set(token, {
+    userId: foundUser.id,
+    expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  });
+  savePersistedSessions();
+
+  const isAdmin = isAdminEmail(foundUser.email);
+
+  return res.json({
+    success: true,
+    token,
+    user: {
+      id: foundUser.id,
+      email: foundUser.email,
+      name: foundUser.name,
+      role: isAdmin ? 'Administrateur' : foundUser.role,
+      country: foundUser.country,
+      createdAt: foundUser.createdAt,
+      isAdmin,
+    },
+    message: 'Mot de passe réinitialisé avec succès.',
   });
 });
 
@@ -501,7 +955,7 @@ app.get('/api/auth/me', async (req, res) => {
     return res.status(401).json({ success: false, error: 'Session expirée ou non authentifiée.' });
   }
 
-  const isAdmin = user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isAdmin = isAdminEmail(user.email);
 
   return res.json({
     success: true,
@@ -509,7 +963,7 @@ app.get('/api/auth/me', async (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
+      role: isAdmin ? 'Administrateur' : user.role,
       country: user.country,
       createdAt: user.createdAt,
       isAdmin,
@@ -522,23 +976,173 @@ app.post('/api/auth/logout', (req, res) => {
   const token = getBearerToken(req);
   if (token) {
     sessionsStore.delete(token);
+    savePersistedSessions();
   }
   return res.json({ success: true, message: 'Déconnexion réussie.' });
 });
 
-// ================= ADMIN ROUTES (STRICTLY RESTRICTED TO jonatha2ngs@gmail.com) =================
+// ================= PUBLIC PLATFORM SETTINGS =================
 
-// Admin Overview & Data
-app.get('/api/admin/overview', requireAdmin, (req, res) => {
+app.get('/api/platform-settings', (_req, res) => {
+  return res.json({ success: true, settings: settingsStore });
+});
+
+// ================= GOOGLE KEEP COMPATIBLE NOTES & CHECKLISTS =================
+
+app.get('/api/notes', requireAuth, (req, res) => {
+  const user = (req as any).user as StoredUser;
+  const mine = notesStore
+    .filter((n) => n.ownerId === user.id)
+    .sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) ||
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  return res.json({ success: true, notes: mine });
+});
+
+app.post('/api/notes', requireAuth, (req, res) => {
+  const user = (req as any).user as StoredUser;
+  const body = req.body || {};
+
+  const title = typeof body.title === 'string' ? body.title.trim().slice(0, 160) : '';
+  const textBody = typeof body.body === 'string' ? body.body.slice(0, 5000) : '';
+  const isChecklist = Boolean(body.isChecklist);
+  const checklistItems: KeepChecklistItem[] = Array.isArray(body.checklistItems)
+    ? body.checklistItems
+        .filter((it: any) => it && typeof it.text === 'string' && it.text.trim())
+        .slice(0, 60)
+        .map((it: any, idx: number) => ({
+          id:
+            typeof it.id === 'string' && it.id.trim()
+              ? it.id.trim().slice(0, 64)
+              : `chk-${Date.now()}-${idx}`,
+          text: String(it.text).trim().slice(0, 200),
+          checked: Boolean(it.checked),
+        }))
+    : [];
+
+  if (!title && !textBody.trim() && checklistItems.length === 0) {
+    return res.status(400).json({ success: false, error: 'Contenu de note requis.' });
+  }
+
+  const allowedSources = ['local', 'takeout', 'google_keep_api'];
+  const source = allowedSources.includes(body.source) ? body.source : 'local';
+
+  const newNote: KeepNote = {
+    id: `note-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+    ownerId: user.id,
+    title: title || 'Note sans titre',
+    body: textBody,
+    isChecklist,
+    checklistItems,
+    pinned: Boolean(body.pinned),
+    linkedAppId:
+      typeof body.linkedAppId === 'string' && body.linkedAppId.trim()
+        ? body.linkedAppId.trim().slice(0, 80)
+        : undefined,
+    linkedAppTitle:
+      typeof body.linkedAppTitle === 'string' && body.linkedAppTitle.trim()
+        ? body.linkedAppTitle.trim().slice(0, 140)
+        : undefined,
+    source,
+    updatedAt: new Date().toISOString(),
+  };
+
+  notesStore.unshift(newNote);
+  savePersistedNotes();
+  persistNoteToFirestore(newNote);
+
+  return res.json({ success: true, note: newNote });
+});
+
+app.patch('/api/notes/:id', requireAuth, (req, res) => {
+  const user = (req as any).user as StoredUser;
+  const { id } = req.params;
+  const idx = notesStore.findIndex((n) => n.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: 'Note introuvable.' });
+  }
+
+  const existing = notesStore[idx];
+  if (existing.ownerId !== user.id) {
+    return res.status(403).json({ success: false, error: 'Accès interdit à cette note.' });
+  }
+
+  const body = req.body || {};
+  const updated: KeepNote = {
+    ...existing,
+    title:
+      typeof body.title === 'string'
+        ? body.title.trim().slice(0, 160) || 'Note sans titre'
+        : existing.title,
+    body: typeof body.body === 'string' ? body.body.slice(0, 5000) : existing.body,
+    isChecklist:
+      body.isChecklist !== undefined ? Boolean(body.isChecklist) : existing.isChecklist,
+    checklistItems: Array.isArray(body.checklistItems)
+      ? body.checklistItems
+          .filter((it: any) => it && typeof it.text === 'string' && it.text.trim())
+          .slice(0, 60)
+          .map((it: any, i: number) => ({
+            id:
+              typeof it.id === 'string' && it.id.trim()
+                ? it.id.trim().slice(0, 64)
+                : `chk-${Date.now()}-${i}`,
+            text: String(it.text).trim().slice(0, 200),
+            checked: Boolean(it.checked),
+          }))
+      : existing.checklistItems,
+    pinned: body.pinned !== undefined ? Boolean(body.pinned) : existing.pinned,
+    updatedAt: new Date().toISOString(),
+  };
+
+  notesStore[idx] = updated;
+  savePersistedNotes();
+  persistNoteToFirestore(updated);
+
+  return res.json({ success: true, note: updated });
+});
+
+app.delete('/api/notes/:id', requireAuth, (req, res) => {
+  const user = (req as any).user as StoredUser;
+  const { id } = req.params;
+  const existing = notesStore.find((n) => n.id === id);
+  if (!existing) {
+    return res.status(404).json({ success: false, error: 'Note introuvable.' });
+  }
+  if (existing.ownerId !== user.id) {
+    return res.status(403).json({ success: false, error: 'Accès interdit à cette note.' });
+  }
+
+  notesStore = notesStore.filter((n) => n.id !== id);
+  savePersistedNotes();
+  deleteNoteFromFirestoreServer(id);
+
+  return res.json({ success: true, removedId: id });
+});
+
+// ================= ADMIN ROUTES (jonatha2ngs@gmail.com & lumanegrah88@gmail.com) =================
+
+// Admin Overview & Full Platform Data
+app.get('/api/admin/overview', requireAdmin, (_req, res) => {
   const totalApps = appsStore.length;
   const dailyApps = appsStore.filter((a) => a.isDailyDrop).length;
   const totalVotes = appsStore.reduce((sum, a) => sum + (a.votes || 0), 0);
 
   const allPledges: any[] = [];
+  const allComments: any[] = [];
   appsStore.forEach((a) => {
     (a.devPledges || []).forEach((p) => {
       allPledges.push({
         ...p,
+        appId: a.id,
+        appTitle: a.title,
+        appCountry: a.country,
+      });
+    });
+    (a.comments || []).forEach((c) => {
+      allComments.push({
+        ...c,
         appId: a.id,
         appTitle: a.title,
         appCountry: a.country,
@@ -550,10 +1154,11 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     id: u.id,
     email: u.email,
     name: u.name,
-    role: u.role,
+    role: isAdminEmail(u.email) ? 'Administrateur' : u.role,
     country: u.country,
     createdAt: u.createdAt,
-    isAdmin: u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase(),
+    suspended: Boolean(u.suspended),
+    isAdmin: isAdminEmail(u.email),
   }));
 
   return res.json({
@@ -564,11 +1169,100 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
       totalVotes,
       totalPledges: allPledges.length,
       totalUsers: sanitizedUsers.length,
+      totalBuilds: buildsStore.length,
+      totalComments: allComments.length,
+      totalProfiles: profilesStore.size,
+      totalInvitations: invitationsStore.length,
+      totalMessages: messagesStore.length,
     },
     apps: appsStore,
     users: sanitizedUsers,
     pledges: allPledges,
+    builds: buildsStore,
+    comments: allComments,
+    settings: settingsStore,
   });
+});
+
+// Admin Update Global Platform Settings
+app.patch('/api/admin/settings', requireAdmin, (req, res) => {
+  const body = req.body || {};
+  settingsStore = {
+    announcementBanner:
+      typeof body.announcementBanner === 'string'
+        ? body.announcementBanner.trim().slice(0, 300)
+        : settingsStore.announcementBanner,
+    maintenanceMode:
+      body.maintenanceMode !== undefined
+        ? Boolean(body.maintenanceMode)
+        : settingsStore.maintenanceMode,
+    allowRegistrations:
+      body.allowRegistrations !== undefined
+        ? Boolean(body.allowRegistrations)
+        : settingsStore.allowRegistrations,
+    allowAIGeneration:
+      body.allowAIGeneration !== undefined
+        ? Boolean(body.allowAIGeneration)
+        : settingsStore.allowAIGeneration,
+  };
+  savePersistedSettings();
+  return res.json({ success: true, settings: settingsStore });
+});
+
+// Admin Create App directly
+app.post('/api/admin/apps', requireAdmin, (req, res) => {
+  const user = (req as any).user as StoredUser;
+  const data = req.body || {};
+  if (!data.title || !data.problemSolved || !data.country) {
+    return res.status(400).json({ success: false, error: 'Titre, pays et problème résolu requis.' });
+  }
+
+  const resolvedCode = (data.countryCode || getCountryIsoCode(data.country) || 'AF').toUpperCase();
+  const newApp: AppIdea = {
+    id: `adm-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+    title: String(data.title).trim().slice(0, 120),
+    tagline: String(data.tagline || data.title).trim().slice(0, 200),
+    description: String(data.description || data.problemSolved).trim().slice(0, 2000),
+    icon: data.icon || 'Africa',
+    gradient: 'bg-black',
+    continent: 'Afrique',
+    country: String(data.country).trim(),
+    countryCode: resolvedCode,
+    flag: resolvedCode,
+    sector: data.sector || 'Citoyenneté & Droits',
+    targetAudience: String(data.targetAudience || 'Citoyens et acteurs locaux').trim(),
+    problemSolved: String(data.problemSolved).trim(),
+    impactPotential: String(data.impactPotential || 'Impact communautaire direct').trim(),
+    techStackSuggested:
+      Array.isArray(data.techStackSuggested) && data.techStackSuggested.length > 0
+        ? data.techStackSuggested
+        : ['React', 'Node.js', 'PWA Offline'],
+    difficulty: data.difficulty || 'Accessible',
+    status: data.status || 'Recherche Développeurs',
+    votes: 0,
+    isDailyDrop: Boolean(data.isDailyDrop),
+    dailyDropDate: data.isDailyDrop ? new Date().toISOString().split('T')[0] : undefined,
+    createdAt: new Date().toISOString(),
+    authorEmail: user.email,
+    authorName: user.name,
+    devPledges: [],
+    comments: [],
+    developerBrief: {
+      mvpScope: ['Interface mobile responsive', 'Mode hors-ligne', 'API sécurisée'],
+      localConstraints: ['Connexion 2G/3G intermittente', 'Support multi-langue'],
+      monetization: 'Modèle solidaire ou subvention',
+      openSourceFriendly: true,
+      architecturalTip: 'Prioriser la légèreté et l\'accessibilité mobile.',
+    },
+  };
+
+  appsStore.unshift(newApp);
+  savePersistedApps();
+  persistAppToFirestore(newApp);
+  if (newApp.isDailyDrop) {
+    emitDailyDropPublished([newApp], 'admin');
+  }
+  return res.json({ success: true, app: newApp });
 });
 
 // Admin Update App
@@ -579,18 +1273,27 @@ app.patch('/api/admin/apps/:id', requireAdmin, (req, res) => {
     return res.status(404).json({ success: false, error: 'Application introuvable' });
   }
 
-  const updates = req.body;
+  const prevWasDaily = Boolean(appsStore[appIndex].isDailyDrop);
+  const updates = req.body || {};
   appsStore[appIndex] = {
     ...appsStore[appIndex],
     ...updates,
+    dailyDropDate:
+      updates.isDailyDrop === true && !appsStore[appIndex].dailyDropDate && !updates.dailyDropDate
+        ? new Date().toISOString().split('T')[0]
+        : updates.dailyDropDate ?? appsStore[appIndex].dailyDropDate,
   };
   savePersistedApps();
   persistAppToFirestore(appsStore[appIndex]);
 
+  if (!prevWasDaily && Boolean(appsStore[appIndex].isDailyDrop)) {
+    emitDailyDropPublished([appsStore[appIndex]], 'admin');
+  }
+
   return res.json({ success: true, app: appsStore[appIndex] });
 });
 
-// Admin Delete App
+// Admin Delete App (fixed persistence)
 app.delete('/api/admin/apps/:id', requireAdmin, (req, res) => {
   const { id } = req.params;
   const initialLength = appsStore.length;
@@ -600,10 +1303,12 @@ app.delete('/api/admin/apps/:id', requireAdmin, (req, res) => {
     return res.status(404).json({ success: false, error: 'Application introuvable' });
   }
 
+  savePersistedApps();
+  deleteAppFromFirestoreServer(id);
   return res.json({ success: true, message: 'Application supprimée définitivement.' });
 });
 
-// Admin Delete Dev Pledge
+// Admin Delete Dev Pledge (fixed persistence)
 app.delete('/api/admin/pledges/:appId/:pledgeId', requireAdmin, (req, res) => {
   const { appId, pledgeId } = req.params;
   const appItem = appsStore.find((a) => a.id === appId);
@@ -612,10 +1317,148 @@ app.delete('/api/admin/pledges/:appId/:pledgeId', requireAdmin, (req, res) => {
   }
 
   appItem.devPledges = (appItem.devPledges || []).filter((p) => p.id !== pledgeId);
+  savePersistedApps();
+  persistAppToFirestore(appItem);
   return res.json({ success: true, message: 'Engagement développeur retiré.' });
 });
 
-// Admin Delete User
+// Admin Delete Community Comment
+app.delete('/api/admin/comments/:appId/:commentId', requireAdmin, (req, res) => {
+  const { appId, commentId } = req.params;
+  const appItem = appsStore.find((a) => a.id === appId);
+  if (!appItem) {
+    return res.status(404).json({ success: false, error: 'Application introuvable' });
+  }
+
+  const before = (appItem.comments || []).length;
+  appItem.comments = (appItem.comments || []).filter((c) => c.id !== commentId);
+  if (appItem.comments.length === before) {
+    return res.status(404).json({ success: false, error: 'Commentaire introuvable.' });
+  }
+
+  savePersistedApps();
+  persistAppToFirestore(appItem);
+  return res.json({ success: true, message: 'Commentaire modéré et supprimé.' });
+});
+
+// Admin Update Collaborative Build
+app.patch('/api/admin/builds/:buildId', requireAdmin, (req, res) => {
+  const { buildId } = req.params;
+  const idx = buildsStore.findIndex((b) => b.id === buildId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: 'Build introuvable.' });
+  }
+
+  const body = req.body || {};
+  const allowedStages = ['Concept', 'Prototype', 'Alpha', 'Beta', 'Production'];
+  const build = buildsStore[idx];
+  buildsStore[idx] = {
+    ...build,
+    isPublic: body.isPublic !== undefined ? Boolean(body.isPublic) : build.isPublic,
+    progressStage:
+      body.progressStage && allowedStages.includes(body.progressStage)
+        ? body.progressStage
+        : build.progressStage,
+    progressPercent:
+      typeof body.progressPercent === 'number'
+        ? Math.min(100, Math.max(0, body.progressPercent))
+        : build.progressPercent,
+    title:
+      typeof body.title === 'string' && body.title.trim()
+        ? body.title.trim().slice(0, 140)
+        : build.title,
+    updatedAt: new Date().toISOString(),
+  };
+
+  savePersistedBuilds();
+  persistBuildToFirestore(buildsStore[idx]);
+  return res.json({ success: true, build: buildsStore[idx] });
+});
+
+// Admin Delete Collaborative Build
+app.delete('/api/admin/builds/:buildId', requireAdmin, (req, res) => {
+  const { buildId } = req.params;
+  const before = buildsStore.length;
+  buildsStore = buildsStore.filter((b) => b.id !== buildId);
+  if (buildsStore.length === before) {
+    return res.status(404).json({ success: false, error: 'Build introuvable.' });
+  }
+
+  savePersistedBuilds();
+  deleteBuildFromFirestoreServer(buildId);
+  return res.json({ success: true, message: 'Build supprimé définitivement.' });
+});
+
+// Admin Update User (role / suspension)
+app.patch('/api/admin/users/:userId', requireAdmin, (req, res) => {
+  const { userId } = req.params;
+  const target = usersStore.get(userId);
+  if (!target) {
+    return res.status(404).json({ success: false, error: 'Utilisateur introuvable' });
+  }
+
+  const targetIsAdmin = isAdminEmail(target.email);
+  const body = req.body || {};
+
+  if (body.suspended !== undefined) {
+    if (targetIsAdmin && Boolean(body.suspended)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Impossible de suspendre un compte Super Administrateur.',
+      });
+    }
+    target.suspended = Boolean(body.suspended);
+    if (target.suspended) {
+      revokeUserSessions(target.id);
+    }
+  }
+
+  if (typeof body.role === 'string' && body.role.trim() && !targetIsAdmin) {
+    target.role = body.role.trim().slice(0, 80);
+    const prof = profilesStore.get(target.id);
+    if (prof) {
+      prof.role = target.role;
+      profilesStore.set(target.id, prof);
+      savePersistedProfiles();
+    }
+  }
+
+  usersStore.set(target.id, target);
+  savePersistedUsers();
+
+  return res.json({
+    success: true,
+    user: {
+      id: target.id,
+      email: target.email,
+      name: target.name,
+      role: targetIsAdmin ? 'Administrateur' : target.role,
+      country: target.country,
+      createdAt: target.createdAt,
+      suspended: Boolean(target.suspended),
+      isAdmin: targetIsAdmin,
+    },
+  });
+});
+
+// Admin Issue 6-digit Password Recovery Code for a User (Super Admin only)
+app.post('/api/admin/users/:userId/reset-code', requireAdmin, (req, res) => {
+  const { userId } = req.params;
+  const target = usersStore.get(userId);
+  if (!target) {
+    return res.status(404).json({ success: false, error: 'Utilisateur introuvable' });
+  }
+
+  const { code, expiresAt } = createPasswordResetOtp(target.email);
+  return res.json({
+    success: true,
+    email: target.email,
+    code,
+    expiresAt,
+  });
+});
+
+// Admin Delete User (fixed persistence + protects all super admins)
 app.delete('/api/admin/users/:userId', requireAdmin, (req, res) => {
   const { userId } = req.params;
   const target = usersStore.get(userId);
@@ -623,11 +1466,16 @@ app.delete('/api/admin/users/:userId', requireAdmin, (req, res) => {
     return res.status(404).json({ success: false, error: 'Utilisateur introuvable' });
   }
 
-  if (target.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-    return res.status(400).json({ success: false, error: 'Impossible de supprimer le compte administrateur.' });
+  if (isAdminEmail(target.email)) {
+    return res.status(400).json({ success: false, error: 'Impossible de supprimer un compte administrateur.' });
   }
 
   usersStore.delete(userId);
+  savePersistedUsers();
+  if (profilesStore.delete(userId)) {
+    savePersistedProfiles();
+  }
+  revokeUserSessions(userId);
   return res.json({ success: true, message: 'Compte utilisateur supprimé.' });
 });
 
@@ -967,6 +1815,13 @@ function createFallbackProposals(params: {
 
 // 7. AI Generation: 4 New proposals exclusively for Africa (with resilient fallback)
 app.post('/api/gemini/generate-proposals', requireAuth, async (req, res) => {
+  const tokenUser = (req as any).user as StoredUser;
+  if (!settingsStore.allowAIGeneration && !isAdminEmail(tokenUser.email)) {
+    return res.status(403).json({
+      success: false,
+      error: "La génération de concepts par IA est temporairement désactivée par l'administration.",
+    });
+  }
   const { country = '', sector = 'Tous', focus = '' } = req.body;
   let newApps: AppIdea[] = [];
 
@@ -1092,6 +1947,7 @@ Réponds STRICTEMENT avec un tableau JSON de 4 objets au format suivant :
   appsStore.unshift(...newApps);
   savePersistedApps();
   persistMultipleAppsToFirestore(newApps);
+  emitDailyDropPublished(newApps, 'ai');
 
   return res.json({
     success: true,
@@ -1299,7 +2155,7 @@ function sanitizeScreenshots(rawList: unknown): string[] {
 
 function isBuildMember(build: ProjectBuild, user: StoredUser): boolean {
   if (build.ownerId === user.id) return true;
-  if (user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) return true;
+  if (isAdminEmail(user.email)) return true;
   return (build.members || []).some((m) => m.userId === user.id);
 }
 
@@ -2236,6 +3092,337 @@ ${JSON.stringify(missingInputs)}`;
   }
 });
 
+// ================= PORTFOLIOS, PROFILES, INVITATIONS & SHORT CHAT =================
+
+// List public portfolios/profiles (no PII exposed)
+app.get('/api/profiles', (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const availability = typeof req.query.availability === 'string' ? req.query.availability : '';
+
+  let list = Array.from(profilesStore.values());
+  if (q) {
+    list = list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.country.toLowerCase().includes(q) ||
+        p.role.toLowerCase().includes(q) ||
+        p.headline.toLowerCase().includes(q) ||
+        p.bio.toLowerCase().includes(q) ||
+        p.skills.some((s) => s.toLowerCase().includes(q))
+    );
+  }
+  if (availability && availability !== 'Tous') {
+    list = list.filter((p) => p.availability === availability);
+  }
+
+  list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return res.json({ success: true, profiles: list });
+});
+
+// Get single public profile + contributions summary
+app.get('/api/profiles/:userId', (req, res) => {
+  const { userId } = req.params;
+  const profile = profilesStore.get(userId);
+  if (!profile) {
+    return res.status(404).json({ success: false, error: 'Profil introuvable.' });
+  }
+
+  const buildsCount = buildsStore.filter((b) =>
+    b.members.some((m) => m.userId === userId)
+  ).length;
+  const pledgesCount = appsStore.filter((a) =>
+    (a.devPledges || []).some(
+      (p) => p.name.toLowerCase() === profile.name.toLowerCase()
+    )
+  ).length;
+
+  return res.json({
+    success: true,
+    profile,
+    stats: { buildsCount, pledgesCount },
+  });
+});
+
+// Update authenticated user's brief portfolio
+app.put('/api/profiles/me', requireAuth, (req, res) => {
+  const user: StoredUser = (req as any).user;
+  const body = req.body || {};
+  const existing = ensurePublicProfileForUser(user);
+
+  const allowedAvailability: AvailabilityStatus[] = [
+    'Disponible',
+    'Ouvert aux collabs',
+    'Occupé',
+  ];
+  const nextAvailability: AvailabilityStatus = allowedAvailability.includes(body.availability)
+    ? body.availability
+    : existing.availability;
+
+  const cleanHeadline =
+    typeof body.headline === 'string'
+      ? body.headline.trim().slice(0, 100)
+      : existing.headline;
+  const cleanBio =
+    typeof body.bio === 'string' ? body.bio.trim().slice(0, 400) : existing.bio;
+
+  const cleanSkills: string[] = Array.isArray(body.skills)
+    ? body.skills
+        .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+        .map((s: string) => s.trim().slice(0, 32))
+        .slice(0, 8)
+    : existing.skills;
+
+  const cleanItems: PortfolioItem[] = Array.isArray(body.portfolioItems)
+    ? body.portfolioItems
+        .filter((item: any) => item && typeof item.title === 'string' && item.title.trim())
+        .slice(0, 4)
+        .map((item: any, idx: number) => ({
+          id:
+            typeof item.id === 'string' && item.id.trim()
+              ? item.id.trim().slice(0, 64)
+              : `pf-${Date.now()}-${idx}`,
+          title: String(item.title).trim().slice(0, 80),
+          description:
+            typeof item.description === 'string'
+              ? item.description.trim().slice(0, 200)
+              : '',
+          tech:
+            typeof item.tech === 'string' && item.tech.trim()
+              ? item.tech.trim().slice(0, 60)
+              : undefined,
+          url: sanitizeSafeWebUrl(item.url),
+        }))
+    : existing.portfolioItems;
+
+  const updated: PublicProfile = {
+    id: user.id,
+    name:
+      typeof body.name === 'string' && body.name.trim()
+        ? body.name.trim().slice(0, 120)
+        : existing.name,
+    role:
+      typeof body.role === 'string' && body.role.trim()
+        ? body.role.trim().slice(0, 80)
+        : existing.role,
+    country:
+      typeof body.country === 'string' && body.country.trim()
+        ? body.country.trim().slice(0, 80)
+        : existing.country,
+    headline: cleanHeadline,
+    bio: cleanBio,
+    skills: cleanSkills,
+    portfolioItems: cleanItems,
+    githubUrl:
+      body.githubUrl !== undefined
+        ? sanitizeSafeWebUrl(body.githubUrl)
+        : existing.githubUrl,
+    websiteUrl:
+      body.websiteUrl !== undefined
+        ? sanitizeSafeWebUrl(body.websiteUrl)
+        : existing.websiteUrl,
+    availability: nextAvailability,
+    updatedAt: new Date().toISOString(),
+  };
+
+  profilesStore.set(user.id, updated);
+  savePersistedProfiles();
+  emitSocketBroadcast('profile:updated', updated);
+
+  return res.json({ success: true, profile: updated });
+});
+
+// List invitations for authenticated user (sent & received)
+app.get('/api/invitations', requireAuth, (req, res) => {
+  const user: StoredUser = (req as any).user;
+  const mine = invitationsStore
+    .filter((inv) => inv.fromUserId === user.id || inv.toUserId === user.id)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  return res.json({ success: true, invitations: mine });
+});
+
+// Send a connection invitation before starting a conversation
+app.post('/api/invitations', requireAuth, (req, res) => {
+  const user: StoredUser = (req as any).user;
+  const { toUserId, note } = req.body || {};
+
+  if (!toUserId || typeof toUserId !== 'string') {
+    return res.status(400).json({ success: false, error: 'Destinataire requis.' });
+  }
+  if (toUserId === user.id) {
+    return res.status(400).json({ success: false, error: 'Vous ne pouvez pas vous inviter vous-même.' });
+  }
+
+  const recipient = profilesStore.get(toUserId);
+  if (!recipient) {
+    return res.status(404).json({ success: false, error: 'Profil destinataire introuvable.' });
+  }
+
+  const activeExisting = invitationsStore.find(
+    (inv) =>
+      (inv.status === 'pending' || inv.status === 'accepted') &&
+      ((inv.fromUserId === user.id && inv.toUserId === toUserId) ||
+        (inv.fromUserId === toUserId && inv.toUserId === user.id))
+  );
+
+  if (activeExisting) {
+    return res.status(409).json({
+      success: false,
+      error:
+        activeExisting.status === 'accepted'
+          ? 'Vous êtes déjà connectés et pouvez discuter.'
+          : 'Une invitation est déjà en attente entre vous.',
+      invitation: activeExisting,
+    });
+  }
+
+  const senderProfile = ensurePublicProfileForUser(user);
+  const newInvite: ConnectionInvite = {
+    id: `inv-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    fromUserId: user.id,
+    fromUserName: senderProfile.name,
+    fromUserRole: senderProfile.role,
+    fromUserCountry: senderProfile.country,
+    toUserId: recipient.id,
+    toUserName: recipient.name,
+    toUserRole: recipient.role,
+    toUserCountry: recipient.country,
+    note: typeof note === 'string' && note.trim() ? note.trim().slice(0, 200) : undefined,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+
+  invitationsStore.unshift(newInvite);
+  savePersistedInvitations();
+  emitSocketToUsers([user.id, recipient.id], 'invite:created', newInvite);
+
+  return res.json({ success: true, invitation: newInvite });
+});
+
+// Accept, decline, or cancel an invitation
+app.patch('/api/invitations/:id', requireAuth, (req, res) => {
+  const user: StoredUser = (req as any).user;
+  const { id } = req.params;
+  const { action } = req.body || {};
+
+  const idx = invitationsStore.findIndex((inv) => inv.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: 'Invitation introuvable.' });
+  }
+
+  const invite = invitationsStore[idx];
+
+  if (action === 'cancel') {
+    if (invite.fromUserId !== user.id || invite.status !== 'pending') {
+      return res.status(403).json({ success: false, error: 'Action non autorisée.' });
+    }
+    invitationsStore.splice(idx, 1);
+    savePersistedInvitations();
+    emitSocketToUsers([invite.fromUserId, invite.toUserId], 'invite:removed', { id });
+    return res.json({ success: true, removedId: id });
+  }
+
+  if (action !== 'accepted' && action !== 'declined') {
+    return res.status(400).json({ success: false, error: 'Action invalide.' });
+  }
+
+  if (invite.toUserId !== user.id) {
+    return res.status(403).json({
+      success: false,
+      error: 'Seul le destinataire peut accepter ou refuser cette invitation.',
+    });
+  }
+
+  if (invite.status !== 'pending') {
+    return res.status(400).json({ success: false, error: 'Cette invitation a déjà reçu une réponse.' });
+  }
+
+  const updated: ConnectionInvite = {
+    ...invite,
+    status: action,
+    respondedAt: new Date().toISOString(),
+  };
+  invitationsStore[idx] = updated;
+  savePersistedInvitations();
+  emitSocketToUsers([invite.fromUserId, invite.toUserId], 'invite:updated', updated);
+
+  return res.json({ success: true, invitation: updated });
+});
+
+// Get short text messages for an accepted conversation (or all conversations)
+app.get('/api/messages', requireAuth, (req, res) => {
+  const user: StoredUser = (req as any).user;
+  const peerId = typeof req.query.peerId === 'string' ? req.query.peerId.trim() : '';
+
+  if (peerId) {
+    if (!hasAcceptedInviteBetween(user.id, peerId)) {
+      return res.status(403).json({
+        success: false,
+        error: "Une invitation acceptée est requise pour consulter cette conversation.",
+      });
+    }
+    const convId = makeConversationId(user.id, peerId);
+    const thread = messagesStore
+      .filter((m) => m.conversationId === convId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return res.json({ success: true, messages: thread });
+  }
+
+  const mine = messagesStore
+    .filter((m) => m.senderId === user.id || m.recipientId === user.id)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  return res.json({ success: true, messages: mine });
+});
+
+// Send a short text message (strictly requires accepted invitation)
+app.post('/api/messages', requireAuth, (req, res) => {
+  const user: StoredUser = (req as any).user;
+  const { recipientId, text } = req.body || {};
+
+  if (!recipientId || typeof recipientId !== 'string') {
+    return res.status(400).json({ success: false, error: 'Destinataire requis.' });
+  }
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ success: false, error: 'Le message texte ne peut pas être vide.' });
+  }
+
+  const cleanText = text.trim();
+  if (cleanText.length > 500) {
+    return res.status(400).json({
+      success: false,
+      error: 'Message limité à 500 caractères pour des échanges courts et efficaces.',
+    });
+  }
+
+  if (!hasAcceptedInviteBetween(user.id, recipientId)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Invitation requise : le destinataire doit accepter votre invitation avant de discuter.',
+    });
+  }
+
+  const senderProfile = ensurePublicProfileForUser(user);
+  const newMsg: DirectMessage = {
+    id: `msg-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    conversationId: makeConversationId(user.id, recipientId),
+    senderId: user.id,
+    senderName: senderProfile.name,
+    recipientId,
+    text: cleanText,
+    createdAt: new Date().toISOString(),
+  };
+
+  messagesStore.push(newMsg);
+  if (messagesStore.length > 5000) {
+    messagesStore = messagesStore.slice(-5000);
+  }
+  savePersistedMessages();
+  emitSocketToUsers([user.id, recipientId], 'message:created', newMsg);
+
+  return res.json({ success: true, message: newMsg });
+});
+
 // ================= VITE DEV MIDDLEWARE & PRODUCTION =================
 async function startServer() {
   if (process.env.NODE_ENV === 'production') {
@@ -2251,7 +3438,45 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws/social' });
+
+  wss.on('connection', (ws) => {
+    let authedUserId: string | null = null;
+    allSocketsSet.add(ws);
+
+    ws.on('message', async (raw) => {
+      try {
+        const parsed = JSON.parse(raw.toString());
+        if (parsed?.type === 'auth' && typeof parsed.token === 'string') {
+          const user = await resolveUserByToken(parsed.token);
+          if (user) {
+            authedUserId = user.id;
+            if (!userSocketsMap.has(user.id)) {
+              userSocketsMap.set(user.id, new Set());
+            }
+            userSocketsMap.get(user.id)!.add(ws);
+            ws.send(JSON.stringify({ event: 'auth:ok', payload: { userId: user.id } }));
+          }
+        }
+      } catch {
+        // Ignore malformed frames
+      }
+    });
+
+    ws.on('close', () => {
+      allSocketsSet.delete(ws);
+      if (authedUserId) {
+        const set = userSocketsMap.get(authedUserId);
+        if (set) {
+          set.delete(ws);
+          if (set.size === 0) userSocketsMap.delete(authedUserId);
+        }
+      }
+    });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`tomorrow server active on http://0.0.0.0:${PORT}`);
   });
 }

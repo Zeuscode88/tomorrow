@@ -54,10 +54,50 @@ import {
 } from './services/firestoreSync';
 import { fetchBuildsFromApi, subscribeToBuilds, sortBuilds } from './services/builderSync';
 import { logoutFromFirebase, subscribeToFirebaseAuthState } from './services/firebaseAuthService';
+import { CommunityHubModal, CommunityHubTab } from './components/CommunityHubModal';
+import { ConnectionInvite, DirectMessage, PublicProfile } from './types/social';
+import {
+  connectSocialSocket,
+  fetchInvitations,
+  fetchMessages,
+  fetchPublicProfiles,
+  respondToInvitation,
+  saveMyPortfolio,
+  SavePortfolioPayload,
+  sendInvitation,
+  sendShortMessage,
+} from './services/socialSync';
+import { SplashLoader } from './components/SplashLoader';
+import { GoogleKeepModal } from './components/GoogleKeepModal';
+import { PlatformSettings } from './types/notes';
+import { setKeepEnterpriseToken } from './services/keepNotesService';
+import {
+  extractNewUnseenDailyDrops,
+  getDailyNotificationPermission,
+  isDailyNotificationsEnabled,
+  NotificationPermissionState,
+  requestAndEnableDailyNotifications,
+  seedSeenDailyDropIds,
+  setDailyNotificationsEnabled,
+  showDailyDropLocalNotification,
+  subscribeCrossTabNotificationClaims,
+} from './services/dailyDropNotifications';
 
 export default function App() {
   const isOnline = useOnlineStatus();
   const { isInstalled, hasInstalledApp } = usePWAInstall();
+
+  const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [isSplashFading, setIsSplashFading] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fadeTimer = setTimeout(() => setIsSplashFading(true), 1100);
+    const hideTimer = setTimeout(() => setShowSplash(false), 1450);
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(hideTimer);
+    };
+  }, []);
 
   // Dark / Light theme state persisted in localStorage
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -153,8 +193,32 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+  const [isKeepModalOpen, setIsKeepModalOpen] = useState<boolean>(false);
+  const [keepInitialAppIdea, setKeepInitialAppIdea] = useState<AppIdea | null>(null);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({
+    announcementBanner: '',
+    maintenanceMode: false,
+    allowRegistrations: true,
+    allowAIGeneration: true,
+  });
   const [isPinSetupModalOpen, setIsPinSetupModalOpen] = useState<boolean>(false);
   const [pinRevision, setPinRevision] = useState<number>(0);
+
+  // Local Service Worker notifications state for "IA du jour"
+  const [dailyNotifsEnabled, setDailyNotifsEnabled] = useState<boolean>(() =>
+    isDailyNotificationsEnabled()
+  );
+  const [dailyNotifPermission, setDailyNotifPermission] =
+    useState<NotificationPermissionState>(() => getDailyNotificationPermission());
+
+  // Social: Brief Portfolios, Invitations & Accepted Short Messages
+  const [profiles, setProfiles] = useState<PublicProfile[]>([]);
+  const [invitations, setInvitations] = useState<ConnectionInvite[]>([]);
+  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [isCommunityHubOpen, setIsCommunityHubOpen] = useState<boolean>(false);
+  const [communityInitialTab, setCommunityInitialTab] = useState<CommunityHubTab>('profiles');
+  const [selectedCommunityProfileId, setSelectedCommunityProfileId] = useState<string | null>(null);
+  const [communitySearchPreset, setCommunitySearchPreset] = useState<string>('');
 
   const hasPinConfigured = useMemo(() => {
     void pinRevision;
@@ -408,7 +472,34 @@ export default function App() {
       });
   };
 
+  const refreshBuilds = () => {
+    fetchBuildsFromApi().then((apiBuilds) => {
+      if (apiBuilds.length > 0) {
+        setBuilds((prev) => {
+          const map = new Map<string, ProjectBuild>();
+          prev.forEach((b) => map.set(b.id, b));
+          apiBuilds.forEach((b) => map.set(b.id, b));
+          return sortBuilds(Array.from(map.values()));
+        });
+      }
+    });
+  };
+
   useEffect(() => {
+    fetch('/api/platform-settings')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.settings) {
+          setPlatformSettings(data.settings);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // Seed initial daily drop IDs so historical items never fire stale alerts on startup
+    seedSeenDailyDropIds(apps);
+
     // 1. Subscribe to Firebase Auth state
     const unsubscribeAuth = subscribeToFirebaseAuthState((fbUser, fbToken) => {
       if (fbUser && fbToken) {
@@ -427,6 +518,15 @@ export default function App() {
         const africanApps = fbApps.filter((a) => a.continent === 'Afrique');
         if (africanApps.length > 0) {
           setApps(africanApps);
+          const newlyPublished = extractNewUnseenDailyDrops(africanApps);
+          if (newlyPublished.length > 0) {
+            showDailyDropLocalNotification(newlyPublished);
+            setToastMessage(
+              newlyPublished.length === 1
+                ? `Nouvelle IA du jour publiée : ${newlyPublished[0].title}`
+                : `${newlyPublished.length} nouvelles IA du jour publiées !`
+            );
+          }
         }
       }
     });
@@ -443,6 +543,26 @@ export default function App() {
       }
     });
 
+    // 4. Cross-tab notification deduplication + SW notification click handler
+    const unsubscribeClaims = subscribeCrossTabNotificationClaims();
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OPEN_DAILY_DROP_APP') {
+        const targetId = event.data.appId;
+        setViewMode('store');
+        setSortMode('daily');
+        if (targetId) {
+          setApps((current) => {
+            const matched = current.find((a) => a.id === targetId);
+            if (matched) setActiveAppModal(matched);
+            return current;
+          });
+        }
+      }
+    };
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    }
+
     // Initial fetch from backend API
     fetchApps();
     fetchBuildsFromApi().then((apiBuilds) => {
@@ -458,10 +578,222 @@ export default function App() {
 
     return () => {
       unsubscribeAuth();
+      unsubscribeClaims();
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      }
       if (unsubscribeApps) unsubscribeApps();
       if (unsubscribeBuilds) unsubscribeBuilds();
     };
   }, []);
+
+  // Load public profiles on mount + subscribe to social & daily drop WebSocket
+  useEffect(() => {
+    fetchPublicProfiles().then((list) => {
+      if (list.length > 0) setProfiles(list);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (currentUser && authToken) {
+      fetchPublicProfiles().then((list) => {
+        if (list.length > 0) setProfiles(list);
+      });
+      fetchInvitations(authToken).then(setInvitations);
+      fetchMessages(authToken).then(setMessages);
+    } else {
+      setInvitations([]);
+      setMessages([]);
+    }
+
+    const disconnect = connectSocialSocket(authToken, {
+      onProfileUpdated: (prof) => {
+        setProfiles((prev) => {
+          const rest = prev.filter((p) => p.id !== prof.id);
+          return [prof, ...rest];
+        });
+      },
+      onInviteCreated: (inv) => {
+        if (!currentUser) return;
+        setInvitations((prev) => (prev.some((x) => x.id === inv.id) ? prev : [inv, ...prev]));
+        if (inv.toUserId === currentUser.id) {
+          setToastMessage(`Nouvelle invitation reçue de ${inv.fromUserName}`);
+        }
+      },
+      onInviteUpdated: (inv) => {
+        if (!currentUser) return;
+        setInvitations((prev) => {
+          const exists = prev.some((x) => x.id === inv.id);
+          return exists ? prev.map((x) => (x.id === inv.id ? inv : x)) : [inv, ...prev];
+        });
+        if (inv.status === 'accepted' && inv.fromUserId === currentUser.id) {
+          setToastMessage(`${inv.toUserName} a accepté votre invitation !`);
+        }
+      },
+      onInviteRemoved: (removedId) => {
+        if (!currentUser) return;
+        setInvitations((prev) => prev.filter((x) => x.id !== removedId));
+      },
+      onMessageCreated: (msg) => {
+        if (!currentUser) return;
+        setMessages((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
+      },
+      onDailyDropPublished: (payload) => {
+        const incoming = (payload.apps || []).filter((a) => a.continent === 'Afrique');
+        if (incoming.length === 0) return;
+
+        setApps((prev) => {
+          const incomingIds = new Set(incoming.map((a) => a.id));
+          const updatedPrev = prev
+            .filter((a) => !incomingIds.has(a.id))
+            .map((a) =>
+              payload.source === 'ai' && a.isDailyDrop ? { ...a, isDailyDrop: false } : a
+            );
+          return [...incoming, ...updatedPrev];
+        });
+
+        const newlyPublished = extractNewUnseenDailyDrops(incoming);
+        if (newlyPublished.length > 0) {
+          showDailyDropLocalNotification(newlyPublished);
+          setToastMessage(
+            newlyPublished.length === 1
+              ? `Nouvelle IA du jour publiée : ${newlyPublished[0].title}`
+              : `${newlyPublished.length} nouvelles IA du jour viennent d'être publiées !`
+          );
+        }
+      },
+    });
+
+    return () => {
+      disconnect();
+    };
+  }, [currentUser?.id, authToken]);
+
+  const myProfile = useMemo(
+    () => (currentUser ? profiles.find((p) => p.id === currentUser.id) || null : null),
+    [profiles, currentUser]
+  );
+
+  const pendingInvitesCount = useMemo(
+    () =>
+      currentUser
+        ? invitations.filter((inv) => inv.toUserId === currentUser.id && inv.status === 'pending').length
+        : 0,
+    [invitations, currentUser]
+  );
+
+  const handleOpenCommunityHub = (
+    tab: CommunityHubTab = 'profiles',
+    profileId: string | null = null,
+    searchPreset: string = ''
+  ) => {
+    setCommunityInitialTab(tab);
+    setSelectedCommunityProfileId(profileId);
+    setCommunitySearchPreset(searchPreset);
+    setIsCommunityHubOpen(true);
+    fetchPublicProfiles().then((list) => {
+      if (list.length > 0) setProfiles(list);
+    });
+  };
+
+  const handleOpenDeveloperProfile = (devName: string) => {
+    const clean = devName.trim().toLowerCase();
+    const matched = profiles.find((p) => p.name.trim().toLowerCase() === clean);
+    if (matched) {
+      handleOpenCommunityHub('profiles', matched.id, '');
+    } else {
+      handleOpenCommunityHub('profiles', null, devName);
+    }
+  };
+
+  const handleSaveMyPortfolio = async (payload: SavePortfolioPayload) => {
+    if (!currentUser || !authToken) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    const res = await saveMyPortfolio(authToken, payload);
+    if (res.success && res.profile) {
+      const saved = res.profile;
+      setProfiles((prev) => [saved, ...prev.filter((p) => p.id !== saved.id)]);
+      setToastMessage('Votre portfolio bref a été enregistré !');
+    } else {
+      setToastMessage(res.error || 'Impossible de sauvegarder le portfolio.');
+    }
+  };
+
+  const handleSendInvitation = async (toUserId: string, note?: string): Promise<boolean> => {
+    if (!currentUser || !authToken) {
+      setIsAuthModalOpen(true);
+      return false;
+    }
+    const res = await sendInvitation(authToken, toUserId, note);
+    if (res.success && res.invitation) {
+      const created = res.invitation;
+      setInvitations((prev) => (prev.some((x) => x.id === created.id) ? prev : [created, ...prev]));
+      setToastMessage('Invitation envoyée ! La discussion ouvrira après acceptation.');
+      return true;
+    }
+    setToastMessage(res.error || "Impossible d'envoyer l'invitation.");
+    return false;
+  };
+
+  const handleRespondInvitation = async (
+    inviteId: string,
+    action: 'accepted' | 'declined' | 'cancel'
+  ): Promise<boolean> => {
+    if (!currentUser || !authToken) {
+      setIsAuthModalOpen(true);
+      return false;
+    }
+    const res = await respondToInvitation(authToken, inviteId, action);
+    if (res.success) {
+      if (action === 'cancel' && res.removedId) {
+        setInvitations((prev) => prev.filter((x) => x.id !== res.removedId));
+        setToastMessage('Invitation annulée.');
+      } else if (res.invitation) {
+        const updated = res.invitation;
+        setInvitations((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+        setToastMessage(
+          action === 'accepted'
+            ? 'Invitation acceptée ! Vous pouvez maintenant échanger en texte court.'
+            : 'Invitation refusée.'
+        );
+      }
+      return true;
+    }
+    setToastMessage(res.error || "Action impossible sur l'invitation.");
+    return false;
+  };
+
+  const handleSendShortMessage = async (recipientId: string, text: string): Promise<boolean> => {
+    if (!currentUser || !authToken) {
+      setIsAuthModalOpen(true);
+      return false;
+    }
+    const res = await sendShortMessage(authToken, recipientId, text);
+    if (res.success && res.message) {
+      const sent = res.message;
+      setMessages((prev) => (prev.some((x) => x.id === sent.id) ? prev : [...prev, sent]));
+      return true;
+    }
+    setToastMessage(res.error || "Impossible d'envoyer le message.");
+    return false;
+  };
+
+  const handleLoadThread = async (peerId: string) => {
+    if (!authToken) return;
+    const thread = await fetchMessages(authToken, peerId);
+    if (thread.length > 0) {
+      setMessages((prev) => {
+        const map = new Map<string, DirectMessage>();
+        prev.forEach((m) => map.set(m.id, m));
+        thread.forEach((m) => map.set(m.id, m));
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      });
+    }
+  };
 
   const handleBuildsUpdated = (updatedBuild: ProjectBuild) => {
     setBuilds((prev) => {
@@ -533,6 +865,7 @@ export default function App() {
     }
     setCurrentUser(null);
     setAuthToken(null);
+    setKeepEnterpriseToken(null);
     setIsScreenLocked(false);
     setScreenLockState(null);
     setLastBackgroundTimestamp(null);
@@ -765,9 +1098,17 @@ export default function App() {
 
         setApps((prev) => {
           const newIds = new Set(data.apps.map((a: AppIdea) => a.id));
-          const filtered = prev.filter((a) => !newIds.has(a.id));
+          const filtered = prev
+            .filter((a) => !newIds.has(a.id))
+            .map((a) => (a.isDailyDrop ? { ...a, isDailyDrop: false } : a));
           return [...data.apps, ...filtered];
         });
+
+        // Fire local Service Worker notification if not already claimed via WebSocket
+        const newlyPublished = extractNewUnseenDailyDrops(data.apps);
+        if (newlyPublished.length > 0) {
+          showDailyDropLocalNotification(newlyPublished);
+        }
 
         // Reset filters so the 4 newly generated apps are immediately displayed
         setSelectedSector('Tous');
@@ -801,6 +1142,34 @@ export default function App() {
     if (list.length >= 4) return list.slice(0, 4);
     return apps.slice(0, 4);
   }, [apps]);
+
+  const handleToggleDailyNotifications = async () => {
+    if (dailyNotifsEnabled) {
+      setDailyNotificationsEnabled(false);
+      setDailyNotifsEnabled(false);
+      setToastMessage("Alertes locales 'IA du jour' désactivées.");
+      return;
+    }
+
+    const result = await requestAndEnableDailyNotifications(apps);
+    setDailyNotifPermission(result.permission);
+    setDailyNotifsEnabled(result.ok);
+    setToastMessage(result.message);
+  };
+
+  const handleTestDailyNotification = async () => {
+    const sent = await showDailyDropLocalNotification(dailyApps.slice(0, 1), {
+      isTest: true,
+      bypassPreference: true,
+    });
+    if (sent) {
+      setToastMessage('Notification locale envoyée via le Service Worker.');
+    } else {
+      setToastMessage(
+        "Impossible d'afficher la notification. Vérifiez l'autorisation du navigateur."
+      );
+    }
+  };
 
   // Available African countries in catalog
   const availableCountries = useMemo(() => {
@@ -857,8 +1226,8 @@ export default function App() {
     return list;
   }, [apps, selectedCountry, selectedSector, searchQuery, sortMode]);
 
-  const activeBottomTab: BottomTabId = isAIGeneratorModalOpen || studioApp
-    ? 'studio'
+  const activeBottomTab: BottomTabId = isCommunityHubOpen
+    ? 'network'
     : isSubmitModalOpen
     ? 'submit'
     : isProfileModalOpen || isAuthModalOpen
@@ -869,6 +1238,7 @@ export default function App() {
 
   return (
     <div className="min-h-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
+      <SplashLoader visible={showSplash} isFadingOut={isSplashFading} />
       {viewMode === 'render' && publicRenderBuildId ? (
         <PublicRenderView
           buildId={publicRenderBuildId}
@@ -920,10 +1290,26 @@ export default function App() {
             hasPin={hasPinConfigured}
             onLockScreen={handleLockScreen}
             onOpenPinSetup={() => setIsPinSetupModalOpen(true)}
+            onOpenCommunity={() => handleOpenCommunityHub('profiles')}
+            onOpenKeepNotes={() => {
+              setKeepInitialAppIdea(null);
+              setIsKeepModalOpen(true);
+            }}
+            pendingInvitesCount={pendingInvitesCount}
           />
 
           {/* Main Content Container (padded below fixed top bar) */}
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 pt-[72px] sm:pt-[84px] pb-6 sm:px-6 lg:px-8 space-y-8 sm:space-y-10">
+          <main className="mx-auto w-full max-w-7xl flex-1 px-3 sm:px-6 lg:px-8 pt-[62px] sm:pt-[68px] pb-6 space-y-6 sm:space-y-8">
+            {platformSettings.announcementBanner && (
+              <div className="rounded-2xl border border-black dark:border-white bg-black dark:bg-white px-4 py-2.5 text-center text-xs font-bold text-white dark:text-black">
+                {platformSettings.announcementBanner}
+              </div>
+            )}
+            {platformSettings.maintenanceMode && (
+              <div className="rounded-2xl border border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-900 px-4 py-2 text-center text-xs font-semibold text-slate-900 dark:text-slate-100">
+                Maintenance programmée en cours · Certaines opérations peuvent être temporairement limitées.
+              </div>
+            )}
             {!isOnline && (
               <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/70 border border-amber-200 dark:border-amber-900/60 px-4 py-2 text-center text-[11px] font-semibold text-amber-900 dark:text-amber-200 flex items-center justify-center gap-2">
                 <WifiOff className="h-3.5 w-3.5 shrink-0" />
@@ -940,6 +1326,10 @@ export default function App() {
                 userVotes={userVotes}
                 isGenerating={isGenerating}
                 onShowToast={(msg) => setToastMessage(msg)}
+                notificationsEnabled={dailyNotifsEnabled}
+                notificationPermission={dailyNotifPermission}
+                onToggleNotifications={handleToggleDailyNotifications}
+                onTestNotification={handleTestDailyNotification}
               />
             </section>
 
@@ -1072,6 +1462,7 @@ export default function App() {
           <BottomTabBar
             activeTab={activeBottomTab}
             dailyCount={dailyApps.length}
+            pendingInvitesCount={pendingInvitesCount}
             currentUser={currentUser}
             onSelectExplore={() => {
               setSortMode('popular');
@@ -1085,7 +1476,7 @@ export default function App() {
               setSelectedCountry('Tous');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            onOpenAIGenerator={handleOpenAIGenerator}
+            onOpenCommunity={() => handleOpenCommunityHub(pendingInvitesCount > 0 ? 'invites' : 'profiles')}
             onOpenSubmit={handleOpenSubmit}
             onOpenProfileOrAuth={() => {
               if (currentUser) {
@@ -1112,6 +1503,12 @@ export default function App() {
         builds={activeAppModal ? builds.filter((b) => b.appId === activeAppModal.id) : []}
         onOpenStudio={handleOpenStudio}
         onOpenPublicRender={handleOpenPublicRender}
+        onOpenDeveloperProfile={handleOpenDeveloperProfile}
+        onSaveToKeep={(appItem) => {
+          setKeepInitialAppIdea(appItem);
+          setActiveAppModal(null);
+          setIsKeepModalOpen(true);
+        }}
       />
 
       <ProjectBuilderStudio
@@ -1181,6 +1578,45 @@ export default function App() {
         hasInstalledApp={isInstalled || hasInstalledApp}
         onOpenPinSetup={() => setIsPinSetupModalOpen(true)}
         onLockScreen={handleLockScreen}
+        myProfile={myProfile}
+        pendingInvitesCount={pendingInvitesCount}
+        onSavePortfolio={handleSaveMyPortfolio}
+        onOpenCommunityHub={(tab) => handleOpenCommunityHub(tab || 'profiles')}
+        onOpenAdmin={() => setIsAdminModalOpen(true)}
+        onOpenKeepNotes={() => {
+          setKeepInitialAppIdea(null);
+          setIsKeepModalOpen(true);
+        }}
+        notificationsEnabled={dailyNotifsEnabled}
+        notificationPermission={dailyNotifPermission}
+        onToggleNotifications={handleToggleDailyNotifications}
+        onTestNotification={handleTestDailyNotification}
+      />
+
+      <CommunityHubModal
+        isOpen={isCommunityHubOpen}
+        onClose={() => setIsCommunityHubOpen(false)}
+        initialTab={communityInitialTab}
+        initialSelectedProfileId={selectedCommunityProfileId}
+        initialSearchQuery={communitySearchPreset}
+        currentUser={currentUser}
+        profiles={profiles}
+        invitations={invitations}
+        messages={messages}
+        apps={apps}
+        builds={builds}
+        onOpenAuth={() => {
+          setIsCommunityHubOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+        onOpenMyPortfolio={() => {
+          setIsCommunityHubOpen(false);
+          setIsProfileModalOpen(true);
+        }}
+        onSendInvitation={handleSendInvitation}
+        onRespondInvitation={handleRespondInvitation}
+        onSendMessage={handleSendShortMessage}
+        onLoadThread={handleLoadThread}
       />
 
       {currentUser && (
@@ -1214,6 +1650,23 @@ export default function App() {
         onShowToast={(msg) => setToastMessage(msg)}
         onRefreshApps={fetchApps}
         onSelectApp={setActiveAppModal}
+        onSettingsUpdated={(s) => setPlatformSettings(s)}
+        onRefreshBuilds={refreshBuilds}
+      />
+
+      <GoogleKeepModal
+        isOpen={isKeepModalOpen}
+        onClose={() => {
+          setIsKeepModalOpen(false);
+          setKeepInitialAppIdea(null);
+        }}
+        currentUser={currentUser}
+        authToken={authToken}
+        initialAppIdea={keepInitialAppIdea}
+        onClearInitialAppIdea={() => setKeepInitialAppIdea(null)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onLoginSuccess={handleLoginSuccess}
+        onShowToast={(msg) => setToastMessage(msg)}
       />
 
       <PWAInstallBanner onShowToast={(msg) => setToastMessage(msg)} />

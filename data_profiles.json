@@ -1,0 +1,26 @@
+[
+  {
+    "id": "usr-admin-jonathan",
+    "name": "Jonathan (Administrateur)",
+    "role": "Administrateur",
+    "country": "France",
+    "headline": "Administrateur",
+    "bio": "",
+    "skills": [],
+    "portfolioItems": [],
+    "availability": "Ouvert aux collabs",
+    "updatedAt": "2026-09-29T23:42:45.573Z"
+  },
+  {
+    "id": "usr-1790725368515-6c3af637",
+    "name": "Amadou Diop",
+    "role": "Citoyen / Usager",
+    "country": "Sénégal",
+    "headline": "Citoyen / Usager",
+    "bio": "",
+    "skills": [],
+    "portfolioItems": [],
+    "availability": "Ouvert aux collabs",
+    "updatedAt": "2026-09-29T23:42:48.515Z"
+  }
+]

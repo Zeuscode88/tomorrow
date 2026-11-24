@@ -40,6 +40,225 @@
       },
       "required": ["email", "name", "role", "createdAt"]
     },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Public developer or member brief portfolio without private PII",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "User identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Community role"
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "African country"
+        },
+        "headline": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Short specialty headline"
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 450,
+          "description": "Brief portfolio presentation"
+        },
+        "githubUrl": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Optional GitHub profile URL"
+        },
+        "websiteUrl": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Optional website URL"
+        },
+        "availability": {
+          "type": "string",
+          "enum": ["Disponible", "Ouvert aux collabs", "Occupé"],
+          "description": "Collaboration availability"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Last portfolio update timestamp"
+        }
+      },
+      "required": ["id", "name", "role", "country", "availability", "updatedAt"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "Connection invitation sent before opening a short text conversation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique invitation ID"
+        },
+        "fromUserId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Sender user ID"
+        },
+        "fromUserName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Sender display name"
+        },
+        "toUserId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Recipient user ID"
+        },
+        "toUserName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Recipient display name"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Optional short invitation message"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"],
+          "description": "Invitation status"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Creation timestamp"
+        },
+        "respondedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Acceptance or decline timestamp"
+        }
+      },
+      "required": ["id", "fromUserId", "fromUserName", "toUserId", "toUserName", "status", "createdAt"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Short text message exchanged after an accepted connection invitation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique message ID"
+        },
+        "conversationId": {
+          "type": "string",
+          "maxLength": 260,
+          "description": "Deterministic conversation thread ID"
+        },
+        "senderId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Sender user ID"
+        },
+        "senderName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Sender display name"
+        },
+        "recipientId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Recipient user ID"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Short message body"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["id", "conversationId", "senderId", "senderName", "recipientId", "text", "createdAt"]
+    },
+    "KeepNote": {
+      "title": "KeepNote",
+      "description": "User note or checklist synced with tomorrow Notes / Google Keep",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique note ID"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Owner user ID"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Note title"
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 3000,
+          "description": "Text note content"
+        },
+        "isChecklist": {
+          "type": "boolean",
+          "description": "Whether the note is a checklist"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the note is pinned"
+        },
+        "linkedAppId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional linked tomorrow App ID"
+        },
+        "linkedAppTitle": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Optional linked tomorrow App title"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["local", "takeout", "google_keep_api"],
+          "description": "Origin of the note"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "ownerId", "title", "isChecklist", "pinned", "source", "updatedAt"]
+    },
     "App": {
       "title": "App",
       "description": "Application concept document in tomorrow",
@@ -187,7 +406,23 @@
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Collection of user profiles keyed by user ID"
+      "description": "Collection of private user profiles keyed by user ID"
+    },
+    "/public_profiles/{profileId}": {
+      "schema": "PublicProfile",
+      "description": "Public brief portfolios without PII for developers and members"
+    },
+    "/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "Connection invitations between members"
+    },
+    "/messages/{messageId}": {
+      "schema": "DirectMessage",
+      "description": "Short text messages between connected members"
+    },
+    "/notes/{noteId}": {
+      "schema": "KeepNote",
+      "description": "Personal notes and checklists synced for Google Keep workflow"
     },
     "/apps/{appId}": {
       "schema": "App",

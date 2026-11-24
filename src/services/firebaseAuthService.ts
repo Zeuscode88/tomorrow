@@ -1,6 +1,9 @@
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -8,25 +11,27 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { User, UserRole } from '../types/auth';
+import { isAdminEmail } from '../utils/adminAuth';
 
-const ADMIN_EMAIL = 'jonatha2ngs@gmail.com';
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export async function registerWithFirebase(
   email: string,
   pass: string,
   name: string,
   role: UserRole = 'Citoyen / Usager',
-  country = 'Afrique'
+  country = "Côte d'Ivoire"
 ): Promise<User> {
   const cred = await createUserWithEmailAndPassword(auth, email, pass);
   const uid = cred.user.uid;
-  const isAdmin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const isAdmin = isAdminEmail(email);
 
   const userProfile: User = {
     id: uid,
     email,
     name,
-    role,
+    role: isAdmin ? 'Administrateur' : role,
     country,
     createdAt: new Date().toISOString(),
     isAdmin,
@@ -44,12 +49,18 @@ export async function registerWithFirebase(
 export async function loginWithFirebase(email: string, pass: string): Promise<User> {
   const cred = await signInWithEmailAndPassword(auth, email, pass);
   const uid = cred.user.uid;
-  const isAdmin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  const resolvedEmail = cred.user.email || email;
+  const isAdmin = isAdminEmail(resolvedEmail);
 
   try {
     const userDoc = await getDoc(doc(db, 'users', uid));
     if (userDoc.exists()) {
-      return userDoc.data() as User;
+      const existing = userDoc.data() as User;
+      return {
+        ...existing,
+        isAdmin: existing.isAdmin || isAdmin,
+        role: isAdmin ? 'Administrateur' : existing.role,
+      };
     }
   } catch (err) {
     console.warn('Could not read user profile from Firestore:', err);
@@ -57,12 +68,64 @@ export async function loginWithFirebase(email: string, pass: string): Promise<Us
 
   return {
     id: uid,
-    email: cred.user.email || email,
-    name: cred.user.displayName || email.split('@')[0],
+    email: resolvedEmail,
+    name: cred.user.displayName || resolvedEmail.split('@')[0],
     role: isAdmin ? 'Administrateur' : 'Citoyen / Usager',
     createdAt: new Date().toISOString(),
     isAdmin,
   };
+}
+
+export async function signInWithGoogle(): Promise<{ user: User; token: string }> {
+  const cred = await signInWithPopup(auth, googleProvider);
+  const fbUser = cred.user;
+  const token = await fbUser.getIdToken();
+  const email = fbUser.email || '';
+  const isAdmin = isAdminEmail(email);
+
+  let userProfile: User | null = null;
+  try {
+    const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
+    if (userDoc.exists()) {
+      const existing = userDoc.data() as User;
+      userProfile = {
+        ...existing,
+        email: email || existing.email,
+        isAdmin: existing.isAdmin || isAdmin,
+        role: isAdmin ? 'Administrateur' : existing.role,
+      };
+    }
+  } catch (err) {
+    console.warn('Could not read Google user profile from Firestore:', err);
+  }
+
+  if (!userProfile) {
+    userProfile = {
+      id: fbUser.uid,
+      email,
+      name: fbUser.displayName || (email ? email.split('@')[0] : 'Membre Google'),
+      role: isAdmin ? 'Administrateur' : 'Développeur local',
+      country: "Côte d'Ivoire",
+      createdAt: new Date().toISOString(),
+      isAdmin,
+    };
+    try {
+      await setDoc(doc(db, 'users', fbUser.uid), userProfile, { merge: true });
+    } catch (err) {
+      console.warn('Could not persist Google user profile to Firestore:', err);
+    }
+  }
+
+  return { user: userProfile, token };
+}
+
+export async function sendFirebasePasswordReset(email: string): Promise<{ sent: boolean; code?: string }> {
+  try {
+    await sendPasswordResetEmail(auth, email.trim());
+    return { sent: true };
+  } catch (err: any) {
+    return { sent: false, code: err?.code || 'unknown' };
+  }
 }
 
 export async function logoutFromFirebase(): Promise<void> {
@@ -77,12 +140,21 @@ export function subscribeToFirebaseAuthState(callback: (user: User | null, token
     }
 
     const token = await fbUser.getIdToken();
-    const isAdmin = fbUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const email = fbUser.email || '';
+    const isAdmin = isAdminEmail(email);
 
     try {
       const userDoc = await getDoc(doc(db, 'users', fbUser.uid));
       if (userDoc.exists()) {
-        callback(userDoc.data() as User, token);
+        const existing = userDoc.data() as User;
+        callback(
+          {
+            ...existing,
+            isAdmin: existing.isAdmin || isAdmin,
+            role: isAdmin ? 'Administrateur' : existing.role,
+          },
+          token
+        );
         return;
       }
     } catch (e) {
@@ -92,8 +164,8 @@ export function subscribeToFirebaseAuthState(callback: (user: User | null, token
     callback(
       {
         id: fbUser.uid,
-        email: fbUser.email || '',
-        name: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Utilisateur'),
+        email,
+        name: fbUser.displayName || (email ? email.split('@')[0] : 'Utilisateur'),
         role: isAdmin ? 'Administrateur' : 'Citoyen / Usager',
         createdAt: new Date().toISOString(),
         isAdmin,

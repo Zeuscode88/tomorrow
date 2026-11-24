@@ -9,8 +9,12 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
+const typedFirebaseConfig = firebaseConfig as typeof firebaseConfig & {
+  firestoreDatabaseId?: string;
+};
+
 // Initialize Firebase client
-export const app = initializeApp(firebaseConfig);
+export const app = initializeApp(typedFirebaseConfig);
 
 // Initialize Authentication
 export const auth = getAuth(app);
@@ -26,14 +30,14 @@ try {
             experimentalForceLongPolling: true,
             experimentalLongPollingOptions: { timeoutSeconds: 15 },
           },
-          firebaseConfig.firestoreDatabaseId || undefined
+          typedFirebaseConfig.firestoreDatabaseId || undefined
         )
-      : firebaseConfig.firestoreDatabaseId
-        ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : typedFirebaseConfig.firestoreDatabaseId
+        ? getFirestore(app, typedFirebaseConfig.firestoreDatabaseId)
         : getFirestore(app);
 } catch {
-  dbInstance = firebaseConfig.firestoreDatabaseId
-    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  dbInstance = typedFirebaseConfig.firestoreDatabaseId
+    ? getFirestore(app, typedFirebaseConfig.firestoreDatabaseId)
     : getFirestore(app);
 }
 

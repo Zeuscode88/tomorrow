@@ -10,11 +10,23 @@ import {
   LogOut,
   Plus,
   Lock,
+  Briefcase,
+  Users,
+  ShieldCheck,
+  StickyNote,
+  Bell,
+  BellRing,
+  BellOff,
 } from 'lucide-react';
 import { AppIdea } from '../types/app';
 import { User } from '../types/auth';
+import { PublicProfile } from '../types/social';
+import { SavePortfolioPayload } from '../services/socialSync';
+import { PortfolioEditor } from './PortfolioEditor';
 import { getAppIcon } from '../utils/icons';
 import { CountryFlagIcon } from '../utils/countryIcons';
+import { isAdminEmail } from '../utils/adminAuth';
+import { NotificationPermissionState } from '../services/dailyDropNotifications';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -31,6 +43,16 @@ interface UserProfileModalProps {
   hasInstalledApp?: boolean;
   onOpenPinSetup?: () => void;
   onLockScreen?: () => void;
+  myProfile?: PublicProfile | null;
+  pendingInvitesCount?: number;
+  onSavePortfolio?: (payload: SavePortfolioPayload) => Promise<void>;
+  onOpenCommunityHub?: (tab?: 'profiles' | 'invites' | 'messages') => void;
+  onOpenAdmin?: () => void;
+  onOpenKeepNotes?: () => void;
+  notificationsEnabled?: boolean;
+  notificationPermission?: NotificationPermissionState;
+  onToggleNotifications?: () => void;
+  onTestNotification?: () => void;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
@@ -48,8 +70,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   hasInstalledApp = false,
   onOpenPinSetup,
   onLockScreen,
+  myProfile = null,
+  pendingInvitesCount = 0,
+  onSavePortfolio,
+  onOpenCommunityHub,
+  onOpenAdmin,
+  onOpenKeepNotes,
+  notificationsEnabled = false,
+  notificationPermission = 'default',
+  onToggleNotifications,
+  onTestNotification,
 }) => {
-  const [activeTab, setActiveTab] = useState<'votes' | 'pledges' | 'ideas'>('votes');
+  const [activeTab, setActiveTab] = useState<'votes' | 'pledges' | 'ideas' | 'portfolio'>('votes');
+  const isAdmin = isAdminEmail(currentUser?.email);
 
   if (!isOpen) return null;
 
@@ -150,23 +183,72 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    onLogout();
-                    onClose();
-                  }}
-                  className="self-start sm:self-auto flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>Déconnexion</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
+                  {isAdmin && onOpenAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenAdmin();
+                      }}
+                      className="inline-flex items-center gap-1 rounded-xl bg-black dark:bg-white px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors whitespace-nowrap"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      <span>Admin</span>
+                    </button>
+                  )}
+
+                  {onOpenKeepNotes && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenKeepNotes();
+                      }}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold text-slate-900 dark:text-white hover:border-black dark:hover:border-white transition-colors whitespace-nowrap"
+                    >
+                      <StickyNote className="h-3.5 w-3.5" />
+                      <span>Notes Keep</span>
+                    </button>
+                  )}
+
+                  {onOpenCommunityHub && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        onOpenCommunityHub(pendingInvitesCount > 0 ? 'invites' : 'profiles');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold text-slate-900 dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-colors whitespace-nowrap"
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                      <span>Réseau</span>
+                      {pendingInvitesCount > 0 && (
+                        <span className="rounded-md bg-black dark:bg-white px-1 py-0.5 text-[9.5px] font-mono font-black text-white dark:text-black">
+                          {pendingInvitesCount}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onLogout();
+                      onClose();
+                    }}
+                    className="flex items-center gap-1 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors whitespace-nowrap"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    <span>Déconnexion</span>
+                  </button>
+                </div>
               </div>
 
               {/* PIN Quick Lock Strip */}
               {(onOpenPinSetup || onLockScreen) && (
-                <div className="mt-4 pt-3.5 border-t border-slate-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-2.5 text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="mt-3 pt-3 border-t border-slate-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <Lock className="h-3.5 w-3.5 text-black dark:text-white shrink-0" />
                     <div className="min-w-0">
                       <span className="font-bold text-slate-900 dark:text-white">
@@ -178,7 +260,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     {hasPin && onLockScreen && (
                       <button
                         type="button"
@@ -186,10 +268,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           onClose();
                           onLockScreen();
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-black dark:bg-white px-3 py-1.5 text-[11px] font-bold text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors"
+                        className="inline-flex items-center gap-1 rounded-xl bg-black dark:bg-white px-2.5 py-1 text-[10.5px] font-bold text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors"
                       >
                         <Lock className="h-3 w-3" />
-                        <span>Verrouiller l'écran</span>
+                        <span>Verrouiller</span>
                       </button>
                     )}
 
@@ -200,102 +282,167 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           onClose();
                           onOpenPinSetup();
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 px-3 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:border-slate-900 dark:hover:border-white transition-colors"
+                        className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 px-2.5 py-1 text-[10.5px] font-semibold text-slate-700 dark:text-slate-200 hover:border-slate-900 dark:hover:border-white transition-colors"
                       >
-                        <span>{hasPin ? 'Gérer le PIN' : 'Configurer un code PIN'}</span>
+                        <span>{hasPin ? 'Gérer PIN' : 'Configurer PIN'}</span>
                       </button>
                     )}
                   </div>
                 </div>
               )}
 
-              <div className="mt-5 grid grid-cols-3 gap-2.5">
+              {/* IA du jour Local Service Worker Notifications Strip */}
+              {onToggleNotifications && notificationPermission !== 'unsupported' && (
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {notificationsEnabled ? (
+                      <BellRing className="h-3.5 w-3.5 text-black dark:text-white shrink-0" />
+                    ) : notificationPermission === 'denied' ? (
+                      <BellOff className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    ) : (
+                      <Bell className="h-3.5 w-3.5 text-black dark:text-white shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        {notificationsEnabled
+                          ? "Alertes 'IA du jour' actives"
+                          : notificationPermission === 'denied'
+                          ? "Notifications bloquées dans le navigateur"
+                          : "Alertes locales 'IA du jour'"}
+                      </span>
+                      <span className="hidden sm:inline text-slate-400 dark:text-slate-500 ml-1.5">
+                        · Service Worker hors-ligne
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {notificationsEnabled && onTestNotification && (
+                      <button
+                        type="button"
+                        onClick={onTestNotification}
+                        className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-950 px-2.5 py-1 text-[10.5px] font-semibold text-slate-700 dark:text-slate-200 hover:border-slate-900 dark:hover:border-white transition-colors"
+                      >
+                        <span>Tester</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={onToggleNotifications}
+                      className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[10.5px] font-bold transition-colors ${
+                        notificationsEnabled
+                          ? 'border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-slate-800 dark:text-slate-200 hover:border-black dark:hover:border-white'
+                          : 'bg-black dark:bg-white text-white dark:text-black hover:bg-slate-800 dark:hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{notificationsEnabled ? 'Désactiver' : 'Activer'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
                 <div
                   onClick={() => setActiveTab('votes')}
-                  className={`cursor-pointer rounded-2xl border p-3 text-center transition-all ${
+                  className={`cursor-pointer rounded-2xl border p-2.5 text-center transition-all ${
                     activeTab === 'votes'
                       ? 'border-black dark:border-white bg-black dark:bg-white text-white dark:text-black shadow-xs'
                       : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950 text-slate-800 dark:text-slate-200 hover:bg-white dark:hover:bg-zinc-800'
                   }`}
                 >
-                  <div className="text-lg font-black">{votedApps.length}</div>
-                  <div className="text-[11px] font-semibold flex items-center justify-center gap-1">
-                    <Heart className="h-3 w-3 fill-current" />
+                  <div className="text-base sm:text-lg font-black tabular-nums">{votedApps.length}</div>
+                  <div className="text-[10px] sm:text-[11px] font-semibold flex items-center justify-center gap-1">
+                    <Heart className="h-3 w-3 fill-current shrink-0" />
                     <span>Votes</span>
                   </div>
                 </div>
 
                 <div
                   onClick={() => setActiveTab('pledges')}
-                  className={`cursor-pointer rounded-2xl border p-3 text-center transition-all ${
+                  className={`cursor-pointer rounded-2xl border p-2.5 text-center transition-all ${
                     activeTab === 'pledges'
                       ? 'border-black dark:border-white bg-black dark:bg-white text-white dark:text-black shadow-xs'
                       : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950 text-slate-800 dark:text-slate-200 hover:bg-white dark:hover:bg-zinc-800'
                   }`}
                 >
-                  <div className="text-lg font-black">{pledgedApps.length}</div>
-                  <div className="text-[11px] font-semibold flex items-center justify-center gap-1">
-                    <Code className="h-3 w-3" />
+                  <div className="text-base sm:text-lg font-black tabular-nums">{pledgedApps.length}</div>
+                  <div className="text-[10px] sm:text-[11px] font-semibold flex items-center justify-center gap-1">
+                    <Code className="h-3 w-3 shrink-0" />
                     <span className="truncate">Engagements</span>
                   </div>
                 </div>
 
                 <div
                   onClick={() => setActiveTab('ideas')}
-                  className={`cursor-pointer rounded-2xl border p-3 text-center transition-all ${
+                  className={`cursor-pointer rounded-2xl border p-2.5 text-center transition-all ${
                     activeTab === 'ideas'
                       ? 'border-black dark:border-white bg-black dark:bg-white text-white dark:text-black shadow-xs'
                       : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950 text-slate-800 dark:text-slate-200 hover:bg-white dark:hover:bg-zinc-800'
                   }`}
                 >
-                  <div className="text-lg font-black">{submittedApps.length}</div>
-                  <div className="text-[11px] font-semibold flex items-center justify-center gap-1">
-                    <Lightbulb className="h-3 w-3" />
+                  <div className="text-base sm:text-lg font-black tabular-nums">{submittedApps.length}</div>
+                  <div className="text-[10px] sm:text-[11px] font-semibold flex items-center justify-center gap-1">
+                    <Lightbulb className="h-3 w-3 shrink-0" />
                     <span>Idées</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex border-b border-slate-200 dark:border-zinc-800 text-xs font-bold pt-2 overflow-x-auto">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap border-b border-slate-200 dark:border-zinc-800 text-[10px] sm:text-[11px] font-bold pt-2 gap-1">
               <button
                 type="button"
                 onClick={() => setActiveTab('votes')}
-                className={`flex items-center gap-1.5 border-b-2 py-3 px-3 whitespace-nowrap transition-colors ${
+                className={`flex items-center justify-center sm:justify-start gap-1 border-b-2 py-2 px-2 sm:px-2.5 whitespace-nowrap transition-colors ${
                   activeTab === 'votes'
                     ? 'border-black dark:border-white text-black dark:text-white'
                     : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Heart className="h-3.5 w-3.5" />
-                <span>Mes Votes ({votedApps.length})</span>
+                <Heart className="h-3 w-3 shrink-0" />
+                <span className="truncate">Votes ({votedApps.length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab('pledges')}
-                className={`flex items-center gap-1.5 border-b-2 py-3 px-3 whitespace-nowrap transition-colors ${
+                className={`flex items-center justify-center sm:justify-start gap-1 border-b-2 py-2 px-2 sm:px-2.5 whitespace-nowrap transition-colors ${
                   activeTab === 'pledges'
                     ? 'border-black dark:border-white text-black dark:text-white'
                     : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Code className="h-3.5 w-3.5" />
-                <span>Mes Engagements Dev ({pledgedApps.length})</span>
+                <Code className="h-3 w-3 shrink-0" />
+                <span className="truncate">Engagements ({pledgedApps.length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab('ideas')}
-                className={`flex items-center gap-1.5 border-b-2 py-3 px-3 whitespace-nowrap transition-colors ${
+                className={`flex items-center justify-center sm:justify-start gap-1 border-b-2 py-2 px-2 sm:px-2.5 whitespace-nowrap transition-colors ${
                   activeTab === 'ideas'
                     ? 'border-black dark:border-white text-black dark:text-white'
                     : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Lightbulb className="h-3.5 w-3.5" />
-                <span>Mes Idées Proposées ({submittedApps.length})</span>
+                <Lightbulb className="h-3 w-3 shrink-0" />
+                <span className="truncate">Idées ({submittedApps.length})</span>
               </button>
+
+              {onSavePortfolio && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('portfolio')}
+                  className={`flex items-center justify-center sm:justify-start gap-1 border-b-2 py-2 px-2 sm:px-2.5 whitespace-nowrap transition-colors ${
+                    activeTab === 'portfolio'
+                      ? 'border-black dark:border-white text-black dark:text-white'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Briefcase className="h-3 w-3 shrink-0" />
+                  <span className="truncate">Portfolio</span>
+                </button>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto pt-4 space-y-3 pr-1">
@@ -343,10 +490,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           <button
                             type="button"
                             onClick={(e) => onVote(app.id, e)}
-                            className="flex items-center gap-1 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 px-2.5 py-1 text-xs font-bold text-rose-700 dark:text-rose-300"
+                            className="flex items-center gap-1 rounded-xl bg-black dark:bg-white border border-black dark:border-white px-2.5 py-1 text-xs font-bold text-white dark:text-black"
                             title="Retirer mon vote"
                           >
-                            <Heart className="h-3 w-3 fill-rose-500 text-rose-500" />
+                            <Heart className="h-3 w-3 fill-current" />
                             <span>{app.votes}</span>
                           </button>
 
@@ -513,6 +660,22 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     ))
                   )}
                 </>
+              )}
+
+              {activeTab === 'portfolio' && onSavePortfolio && (
+                <PortfolioEditor
+                  currentUser={currentUser}
+                  profile={myProfile}
+                  onSave={onSavePortfolio}
+                  onOpenPublicNetwork={
+                    onOpenCommunityHub
+                      ? () => {
+                          onClose();
+                          onOpenCommunityHub('profiles');
+                        }
+                      : undefined
+                  }
+                />
               )}
             </div>
           </>

@@ -3,12 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>tomorrow - Les Apps Qui Devraient Exister</title>
+    <title>tomorrow</title>
+    <meta name="application-name" content="tomorrow" />
     <meta name="description" content="L'App Store africain des applications qui manquent à l'Afrique. Découvrez, explorez par pays africain et secteur, votez pour inspirer les développeurs locaux, avec 4 nouveautés quotidiennes propulsées par IA." />
-    <meta property="og:title" content="tomorrow - Les Apps Qui Devraient Exister" />
+    <meta property="og:site_name" content="tomorrow" />
+    <meta property="og:title" content="tomorrow" />
     <meta property="og:description" content="L'App Store africain des applications qui manquent à l'Afrique. Découvrez, explorez par pays africain et secteur, votez pour inspirer les développeurs locaux, avec 4 nouveautés quotidiennes propulsées par IA." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="tomorrow" />
     <meta name="theme-color" content="#000000" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -28,9 +31,54 @@
         } catch (e) {}
       })();
     </script>
+    <style>
+      @keyframes tmSplashBar {
+        0% { transform: translateX(-100%); }
+        50% { transform: translateX(130%); }
+        100% { transform: translateX(-100%); }
+      }
+      #tm-boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background-color: #ffffff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 24px;
+      }
+      #tm-boot-splash img {
+        width: 144px;
+        height: 144px;
+        border-radius: 24px;
+        object-fit: contain;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      }
+      #tm-boot-track {
+        width: 112px;
+        height: 2px;
+        background: #e2e8f0;
+        border-radius: 9999px;
+        overflow: hidden;
+      }
+      #tm-boot-bar {
+        width: 48px;
+        height: 100%;
+        background: #000000;
+        border-radius: 9999px;
+        animation: tmSplashBar 1.25s ease-in-out infinite;
+      }
+    </style>
   </head>
   <body class="h-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 selection:bg-slate-900 selection:text-white dark:selection:bg-white dark:selection:text-black">
-    <div id="root" class="h-full"></div>
+    <div id="root" class="h-full">
+      <div id="tm-boot-splash" aria-label="Chargement de tomorrow">
+        <img src="/assets/aistudio/t_20261122_052244_0000_024090e2.png" alt="tomorrow Afrique" />
+        <div id="tm-boot-track"><div id="tm-boot-bar"></div></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

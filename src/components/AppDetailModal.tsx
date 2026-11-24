@@ -14,6 +14,7 @@ import {
   Globe,
   ArrowUpRight,
   Upload,
+  StickyNote,
 } from 'lucide-react';
 import { AppIdea } from '../types/app';
 import { ProjectBuild } from '../types/builder';
@@ -37,6 +38,8 @@ interface AppDetailModalProps {
   builds?: ProjectBuild[];
   onOpenStudio?: (app: AppIdea, tab?: 'renders' | 'import' | 'ai' | 'agents') => void;
   onOpenPublicRender?: (build: ProjectBuild) => void;
+  onOpenDeveloperProfile?: (name: string) => void;
+  onSaveToKeep?: (app: AppIdea) => void;
 }
 
 export const AppDetailModal: React.FC<AppDetailModalProps> = ({
@@ -52,6 +55,8 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({
   builds = [],
   onOpenStudio,
   onOpenPublicRender,
+  onOpenDeveloperProfile,
+  onSaveToKeep,
 }) => {
   const [commentAuthor, setCommentAuthor] = useState(currentUser?.name || '');
   const [commentRole, setCommentRole] = useState(currentUser?.role || 'Développeur');
@@ -156,19 +161,23 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({
           </div>
 
           {/* Action CTAs */}
-          <div className="mt-5 sm:mt-6 flex flex-wrap items-center gap-2.5 sm:gap-3">
+          <div className="mt-4 sm:mt-5 flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => onVote(app.id)}
-              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-bold transition-all shadow-xs ${
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] sm:text-xs font-bold transition-all shadow-xs whitespace-nowrap ${
                 hasVoted
-                  ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-900'
-                  : 'bg-white dark:bg-zinc-900 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-zinc-700 hover:border-slate-400'
+                  ? 'bg-black dark:bg-white text-white dark:text-black border border-black dark:border-white'
+                  : 'bg-white dark:bg-zinc-900 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-zinc-700 hover:border-black dark:hover:border-white'
               }`}
             >
-              <Heart className={`h-4 w-4 ${hasVoted ? 'fill-rose-500 text-rose-500' : 'text-slate-400'}`} />
-              <span>{app.votes} votes</span>
-              <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+              <Heart className={`h-3.5 w-3.5 ${hasVoted ? 'fill-current' : 'text-black dark:text-white'}`} />
+              <span className="tabular-nums">{app.votes} votes</span>
+              <span
+                className={`text-[10.5px] font-normal ${
+                  hasVoted ? 'text-slate-300 dark:text-zinc-600' : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
                 {hasVoted ? '(Voté)' : '(Voter)'}
               </span>
             </button>
@@ -176,32 +185,43 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({
             <button
               type="button"
               onClick={() => onOpenPledge(app)}
-              className="flex items-center gap-2 rounded-xl bg-black dark:bg-white px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-semibold text-white dark:text-black shadow-xs hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors active:scale-95"
+              className="flex items-center gap-1.5 rounded-xl bg-black dark:bg-white px-3 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold text-white dark:text-black shadow-xs hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors active:scale-95 whitespace-nowrap"
             >
-              <Code className="h-4 w-4" />
-              <span>Je veux développer cette app</span>
+              <Code className="h-3.5 w-3.5 shrink-0" />
+              <span>Je veux développer</span>
             </button>
 
             {onOpenStudio && (
               <button
                 type="button"
                 onClick={() => onOpenStudio(app, builds.length > 0 ? 'renders' : 'ai')}
-                className="flex items-center gap-2 rounded-xl border border-slate-900 dark:border-white bg-white dark:bg-zinc-900 px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                className="flex items-center gap-1.5 rounded-xl border border-slate-900 dark:border-white bg-white dark:bg-zinc-900 px-3 py-2 text-[11px] sm:text-xs font-bold text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors whitespace-nowrap"
               >
-                <AdinkraMotifIcon className="h-4 w-4 text-black dark:text-white" />
+                <AdinkraMotifIcon className="h-3.5 w-3.5 text-black dark:text-white shrink-0" />
                 <span>
                   Studio Dev, WebView & IA {builds.length > 0 ? `(${builds.length})` : ''}
                 </span>
               </button>
             )}
 
+            {onSaveToKeep && (
+              <button
+                type="button"
+                onClick={() => onSaveToKeep(app)}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-2 text-[11px] sm:text-xs font-semibold text-slate-800 dark:text-slate-100 hover:border-black dark:hover:border-white transition-colors whitespace-nowrap"
+              >
+                <StickyNote className="h-3.5 w-3.5 shrink-0" />
+                <span>Sauvegarder dans Keep</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleShare}
-              className="flex items-center gap-1.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors"
+              className="flex items-center gap-1 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-2 text-[11px] sm:text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors whitespace-nowrap"
             >
-              <Share2 className="h-4 w-4" />
-              <span className="hidden sm:inline">Lien</span>
+              <Share2 className="h-3.5 w-3.5 shrink-0" />
+              <span>Lien</span>
             </button>
           </div>
         </div>
@@ -439,11 +459,22 @@ export const AppDetailModal: React.FC<AppDetailModalProps> = ({
                         <div className="font-bold text-sm text-slate-900 dark:text-white">{p.name}</div>
                         <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{p.role} · {p.country}</div>
                       </div>
-                      {p.githubOrContact && (
+                      {onOpenDeveloperProfile ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onOpenDeveloperProfile(p.name);
+                          }}
+                          className="rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[11px] font-bold text-slate-900 dark:text-white hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-colors shrink-0"
+                        >
+                          Voir profil
+                        </button>
+                      ) : p.githubOrContact ? (
                         <span className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate max-w-[140px]">
                           {p.githubOrContact}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     <p className="text-xs text-slate-700 dark:text-slate-300 italic">"{p.comment}"</p>
                   </div>

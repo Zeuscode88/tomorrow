@@ -120,7 +120,7 @@ export const WorldStats: React.FC<WorldStatsProps> = ({
       </div>
 
       {/* African Countries Quick Selector */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
         {countryStats.map((item) => {
           const isSelected = selectedCountry.toLowerCase() === item.country.toLowerCase();
 
@@ -129,16 +129,16 @@ export const WorldStats: React.FC<WorldStatsProps> = ({
               key={item.country}
               type="button"
               onClick={() => onSelectCountry(isSelected ? 'Tous' : item.country)}
-              className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-center transition-all ${
+              className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-center transition-all ${
                 isSelected
                   ? 'border-black dark:border-white bg-black dark:bg-white text-white dark:text-black shadow-xs'
                   : 'border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950 text-slate-800 dark:text-slate-200 hover:border-slate-400 dark:hover:border-zinc-600 hover:bg-white dark:hover:bg-zinc-800'
               }`}
             >
-              <CountryFlagIcon code={item.code} className="w-6 h-4 mb-2" />
-              <span className="text-xs font-bold leading-tight truncate max-w-full">{item.country}</span>
+              <CountryFlagIcon code={item.code} className="w-5 h-3.5 mb-1.5" />
+              <span className="text-[11px] font-bold leading-tight truncate max-w-full">{item.country}</span>
               <span
-                className={`mt-1 text-[11px] font-mono font-medium ${
+                className={`mt-0.5 text-[10px] font-mono font-medium ${
                   isSelected
                     ? 'text-slate-300 dark:text-slate-700'
                     : 'text-slate-500 dark:text-slate-400'
@@ -152,17 +152,17 @@ export const WorldStats: React.FC<WorldStatsProps> = ({
       </div>
 
       {/* Recharts Bar Chart */}
-      <div className="border-t border-slate-200 dark:border-zinc-800 pt-6 space-y-4">
+      <div className="border-t border-slate-200 dark:border-zinc-800 pt-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-black dark:bg-white text-white dark:text-black">
               <BarChart3 className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
                 Répartition des votes par secteur en Afrique
               </h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="text-[10.5px] text-slate-500 dark:text-slate-400">
                 {selectedCountry === 'Tous'
                   ? "Vue continentale (Toute l'Afrique)"
                   : `Filtré sur le pays : ${selectedCountry}`}
@@ -170,7 +170,7 @@ export const WorldStats: React.FC<WorldStatsProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+          <div className="flex items-center gap-3 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300">
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-xs bg-black dark:bg-white inline-block" />
               <span>Votes citoyens cumulés</span>
@@ -178,12 +178,12 @@ export const WorldStats: React.FC<WorldStatsProps> = ({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/70 p-3 sm:p-5">
-          <div className="h-64 w-full">
+        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/70 p-2.5 sm:p-4">
+          <div className="h-60 sm:h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={chartData}
-                margin={{ top: 12, right: 12, left: -16, bottom: 24 }}
+                margin={{ top: 12, right: 10, left: -16, bottom: 24 }}
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -193,7 +193,7 @@ export const WorldStats: React.FC<WorldStatsProps> = ({
                 <XAxis
                   dataKey="shortName"
                   stroke={isDark ? '#94a3b8' : '#64748b'}
-                  fontSize={11}
+                  fontSize={10}
                   tickLine={false}
                   axisLine={{ stroke: isDark ? '#3f3f46' : '#cbd5e1' }}
                   interval={0}

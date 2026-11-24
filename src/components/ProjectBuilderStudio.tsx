@@ -668,58 +668,58 @@ export const ProjectBuilderStudio: React.FC<ProjectBuilderStudioProps> = ({
         </div>
 
         {/* Studio Navigation Tabs */}
-        <div className="border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/60 px-4 sm:px-5 py-2.5 flex flex-wrap items-center gap-2">
+        <div className="border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/60 px-3 sm:px-5 py-2 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setActiveTab('renders')}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center justify-center sm:justify-start gap-1 rounded-xl px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'renders'
                 ? 'bg-black dark:bg-white text-white dark:text-black'
                 : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'
             }`}
           >
-            <Globe className="h-3.5 w-3.5" />
-            <span>Rendus & Équipes ({projectBuilds.length})</span>
+            <Globe className="h-3 w-3 shrink-0" />
+            <span className="truncate">Rendus & Équipes ({projectBuilds.length})</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('import')}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center justify-center sm:justify-start gap-1 rounded-xl px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'import'
                 ? 'bg-black dark:bg-white text-white dark:text-black'
                 : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'
             }`}
           >
-            <Upload className="h-3.5 w-3.5" />
-            <span>Importer / Versionner</span>
+            <Upload className="h-3 w-3 shrink-0" />
+            <span className="truncate">Importer / Versionner</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('ai')}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center justify-center sm:justify-start gap-1 rounded-xl px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'ai'
                 ? 'bg-black dark:bg-white text-white dark:text-black'
                 : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'
             }`}
           >
-            <AdinkraMotifIcon className="h-3.5 w-3.5" />
-            <span>Studio IA Interne</span>
+            <AdinkraMotifIcon className="h-3 w-3 shrink-0" />
+            <span className="truncate">Studio IA Interne</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('agents')}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors whitespace-nowrap shrink-0 ${
+            className={`inline-flex items-center justify-center sm:justify-start gap-1 rounded-xl px-2.5 py-1.5 text-[10.5px] sm:text-[11px] font-bold transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'agents'
                 ? 'bg-black dark:bg-white text-white dark:text-black'
                 : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800'
             }`}
           >
-            <Plug className="h-3.5 w-3.5" />
-            <span>
-              Agents IA & MCP ({externalAgents.filter((a) => a.enabled).length + mcpServers.filter((m) => m.status === 'connected').length})
+            <Plug className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              Agents & MCP ({externalAgents.filter((a) => a.enabled).length + mcpServers.filter((m) => m.status === 'connected').length})
             </span>
           </button>
         </div>

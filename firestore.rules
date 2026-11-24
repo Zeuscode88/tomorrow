@@ -22,12 +22,84 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email == 'jonatha2ngs@gmail.com'
+            || request.auth.token.email == 'lumanegrah88@gmail.com');
+    }
+
     function isValidUser(data) {
       return data.keys().hasAll(['email', 'name', 'role', 'createdAt'])
         && data.email is string && data.email.size() <= 200
         && data.name is string && data.name.size() <= 120
         && data.role is string && data.role.size() <= 80
         && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidPublicProfile(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'country', 'headline', 'bio', 'skills', 'portfolioItems', 'availability', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'role', 'country', 'headline', 'bio', 'skills', 'portfolioItems', 'githubUrl', 'websiteUrl', 'availability', 'updatedAt'])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.role is string && data.role.size() <= 80
+        && data.country is string && data.country.size() <= 80
+        && data.headline is string && data.headline.size() <= 120
+        && data.bio is string && data.bio.size() <= 450
+        && data.skills is list && data.skills.size() <= 8
+        && data.portfolioItems is list && data.portfolioItems.size() <= 4
+        && (!('githubUrl' in data) || (data.githubUrl is string && data.githubUrl.size() <= 300))
+        && (!('websiteUrl' in data) || (data.websiteUrl is string && data.websiteUrl.size() <= 300))
+        && data.availability in ['Disponible', 'Ouvert aux collabs', 'Occupé']
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidInvitation(data) {
+      return data.keys().hasAll(['id', 'fromUserId', 'fromUserName', 'fromUserRole', 'fromUserCountry', 'toUserId', 'toUserName', 'toUserRole', 'toUserCountry', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'fromUserId', 'fromUserName', 'fromUserRole', 'fromUserCountry', 'toUserId', 'toUserName', 'toUserRole', 'toUserCountry', 'note', 'status', 'createdAt', 'respondedAt'])
+        && isValidId(data.id)
+        && isValidId(data.fromUserId)
+        && isValidId(data.toUserId)
+        && data.fromUserId != data.toUserId
+        && data.fromUserName is string && data.fromUserName.size() <= 120
+        && data.fromUserRole is string && data.fromUserRole.size() <= 80
+        && data.fromUserCountry is string && data.fromUserCountry.size() <= 80
+        && data.toUserName is string && data.toUserName.size() <= 120
+        && data.toUserRole is string && data.toUserRole.size() <= 80
+        && data.toUserCountry is string && data.toUserCountry.size() <= 80
+        && (!('note' in data) || (data.note is string && data.note.size() <= 240))
+        && data.status in ['pending', 'accepted', 'declined']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('respondedAt' in data) || (data.respondedAt is string && data.respondedAt.size() <= 64));
+    }
+
+    function isValidDirectMessage(data) {
+      return data.keys().hasAll(['id', 'conversationId', 'senderId', 'senderName', 'recipientId', 'text', 'createdAt'])
+        && data.keys().hasOnly(['id', 'conversationId', 'senderId', 'senderName', 'recipientId', 'text', 'createdAt'])
+        && isValidId(data.id)
+        && data.conversationId is string && data.conversationId.size() >= 3 && data.conversationId.size() <= 260
+        && isValidId(data.senderId)
+        && isValidId(data.recipientId)
+        && data.senderId != data.recipientId
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 500
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidKeepNote(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'title', 'body', 'isChecklist', 'checklistItems', 'pinned', 'source', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'title', 'body', 'isChecklist', 'checklistItems', 'pinned', 'linkedAppId', 'linkedAppTitle', 'source', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && data.title is string && data.title.size() <= 160
+        && data.body is string && data.body.size() <= 3000
+        && data.isChecklist is bool
+        && data.checklistItems is list && data.checklistItems.size() <= 50
+        && data.pinned is bool
+        && (!('linkedAppId' in data) || (data.linkedAppId is string && data.linkedAppId.size() <= 128))
+        && (!('linkedAppTitle' in data) || (data.linkedAppTitle is string && data.linkedAppTitle.size() <= 160))
+        && data.source in ['local', 'takeout', 'google_keep_api']
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
     function isValidApp(data) {
@@ -65,12 +137,41 @@ service cloud.firestore {
         && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
-    // User profiles (PII scoped to authenticated owner or admin email)
+    // User profiles (PII scoped to authenticated owner or verified admin email)
     match /users/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || (request.auth.token.email_verified == true && request.auth.token.email == 'jonatha2ngs@gmail.com'));
-      allow list: if false;
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
       allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
-      allow update: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidUser(incoming());
+    }
+
+    // Public brief portfolios (no PII / no email)
+    match /public_profiles/{profileId} {
+      allow get, list: if isValidPublicProfile(resource.data);
+      allow create: if isSignedIn() && isValidId(profileId) && request.auth.uid == profileId && incoming().id == profileId && isValidPublicProfile(incoming());
+      allow update: if isSignedIn() && isValidId(profileId) && request.auth.uid == profileId && incoming().id == existing().id && isValidPublicProfile(incoming());
+    }
+
+    // Connection invitations (restricted to participants)
+    match /invitations/{invitationId} {
+      allow get, list: if isSignedIn() && (resource.data.fromUserId == request.auth.uid || resource.data.toUserId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(invitationId) && incoming().id == invitationId && incoming().fromUserId == request.auth.uid && incoming().status == 'pending' && isValidInvitation(incoming());
+      allow update: if isSignedIn() && isValidId(invitationId) && existing().toUserId == request.auth.uid && existing().status == 'pending' && incoming().status in ['accepted', 'declined'] && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'respondedAt']) && incoming().fromUserId == existing().fromUserId && incoming().toUserId == existing().toUserId && incoming().createdAt == existing().createdAt && isValidInvitation(incoming());
+      allow delete: if isSignedIn() && isValidId(invitationId) && existing().fromUserId == request.auth.uid && existing().status == 'pending';
+    }
+
+    // Short text direct messages (restricted to sender/recipient)
+    match /messages/{messageId} {
+      allow get, list: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(messageId) && incoming().id == messageId && incoming().senderId == request.auth.uid && isValidDirectMessage(incoming());
+    }
+
+    // Personal notes & checklists (Google Keep workflow, owner-only)
+    match /notes/{noteId} {
+      allow get, list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(noteId) && incoming().id == noteId && incoming().ownerId == request.auth.uid && isValidKeepNote(incoming());
+      allow update: if isSignedIn() && isValidId(noteId) && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && incoming().id == existing().id && isValidKeepNote(incoming());
+      allow delete: if isSignedIn() && isValidId(noteId) && existing().ownerId == request.auth.uid;
     }
 
     // Applications catalog (shared African App Store)

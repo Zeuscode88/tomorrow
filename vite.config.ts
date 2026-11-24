@@ -10,6 +10,9 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.ts',
         registerType: 'autoUpdate',
         includeAssets: [
           'icon.svg',
@@ -17,10 +20,11 @@ export default defineConfig(() => {
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
+          'assets/aistudio/t_20261122_052244_0000_024090e2.png',
         ],
         manifest: {
           id: '/',
-          name: 'tomorrow — Afrique App Store',
+          name: 'tomorrow',
           short_name: 'tomorrow',
           description:
             "L'App Store africain des applications qui manquent à l'Afrique. Explorez, votez, codez et installez hors-ligne.",
@@ -56,54 +60,14 @@ export default defineConfig(() => {
             },
           ],
         },
-        workbox: {
+        injectManifest: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/api\//],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-          runtimeCaching: [
-            {
-              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'google-fonts-cache',
-                expiration: {
-                  maxEntries: 10,
-                  maxAgeSeconds: 60 * 60 * 24 * 365,
-                },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-            {
-              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'gstatic-fonts-cache',
-                expiration: {
-                  maxEntries: 10,
-                  maxAgeSeconds: 60 * 60 * 24 * 365,
-                },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-            {
-              urlPattern: /\/api\/(apps|builds)(\/.*)?$/i,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'tomorrow-api-offline-cache',
-                networkTimeoutSeconds: 4,
-                expiration: {
-                  maxEntries: 60,
-                  maxAgeSeconds: 60 * 60 * 24 * 7,
-                },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-          ],
         },
         devOptions: {
           enabled: true,
           type: 'module',
+          navigateFallback: 'index.html',
         },
       }),
     ],
